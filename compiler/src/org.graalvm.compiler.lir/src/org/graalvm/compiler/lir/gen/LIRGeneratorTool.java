@@ -314,4 +314,10 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
     default void emitZeroMemory(Value address, Value length, boolean isAligned) {
         throw GraalError.unimplemented("Bulk zeroing is not implemented on this architecture");
     }
+
+    @SuppressWarnings("unused")
+    default void emitVecAggregate(Value inputOffset, Value input, Value output) {
+        throw GraalError.unimplemented("AMD64 specific instruction.");
+    }
+
 }

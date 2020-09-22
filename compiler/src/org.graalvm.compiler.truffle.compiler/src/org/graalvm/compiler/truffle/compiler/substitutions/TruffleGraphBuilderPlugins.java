@@ -76,6 +76,7 @@ import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins.ResolvedJav
 import org.graalvm.compiler.nodes.java.InstanceOfDynamicNode;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
 import org.graalvm.compiler.nodes.type.StampTool;
+import org.graalvm.compiler.nodes.vec.AggregateNode;
 import org.graalvm.compiler.nodes.virtual.EnsureVirtualizedNode;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.replacements.nodes.arithmetic.UnsignedMulHighNode;
@@ -363,6 +364,13 @@ public class TruffleGraphBuilderPlugins {
                     FixedGuardNode fixedGuard = b.add(new FixedGuardNode(condition, DeoptimizationReason.ClassCastException, DeoptimizationAction.InvalidateReprofile, false));
                     b.addPush(JavaKind.Object, DynamicPiNode.create(b.getAssumptions(), b.getConstantReflection(), object, fixedGuard, nullCheckedClass, true));
                 }
+                return true;
+            }
+        });
+        r.register3("vecAggregate", int.class, int[].class, int[].class, new InvocationPlugin() {
+            @Override
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode inputOffset, ValueNode input, ValueNode output) {
+                b.add(new AggregateNode(inputOffset, input, output));
                 return true;
             }
         });

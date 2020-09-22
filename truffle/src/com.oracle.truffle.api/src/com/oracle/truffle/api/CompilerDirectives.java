@@ -457,4 +457,12 @@ public final class CompilerDirectives {
 
     }
 
+    public static void vecAggregate(int inputOffset, int[] input, int[] output) {
+        // TODO:
+        for (int i = inputOffset; i < inputOffset + 16; ++i) {
+            output[input[i]] += 1;
+        }
+    }
+
+
 }

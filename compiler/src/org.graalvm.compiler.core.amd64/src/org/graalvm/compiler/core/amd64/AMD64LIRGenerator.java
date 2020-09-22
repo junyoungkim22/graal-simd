@@ -104,6 +104,7 @@ import org.graalvm.compiler.lir.amd64.AMD64StringUTF16CompressOp;
 import org.graalvm.compiler.lir.amd64.AMD64ZapRegistersOp;
 import org.graalvm.compiler.lir.amd64.AMD64ZapStackOp;
 import org.graalvm.compiler.lir.amd64.AMD64ZeroMemoryOp;
+import org.graalvm.compiler.lir.amd64.vec.AggregateOp;
 import org.graalvm.compiler.lir.amd64.vector.AMD64VectorCompareOp;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.lir.gen.LIRGenerator;
@@ -744,5 +745,10 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
         RegisterValue lengthReg = AMD64.rcx.asValue(length.getValueKind());
         emitMove(lengthReg, length);
         append(new AMD64ZeroMemoryOp(asAddressValue(address), lengthReg));
+    }
+
+    @Override
+    public void emitVecAggregate(Value inputOffset, Value input, Value output) {
+        append(new AggregateOp(this, asAllocatable(inputOffset), input, output));
     }
 }
