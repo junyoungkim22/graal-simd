@@ -320,4 +320,8 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
 
+    @SuppressWarnings("unused")
+    default void emitSimdDoubleMult(Value inputOffset, Value multVal, Value input, Value output) {
+        throw GraalError.unimplemented("AMD64 specific instruction.");
+    }
 }

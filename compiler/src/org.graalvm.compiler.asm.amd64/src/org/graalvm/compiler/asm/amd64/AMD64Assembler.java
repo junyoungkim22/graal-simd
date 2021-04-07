@@ -4394,6 +4394,24 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(src, dst, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    // _mm512_loadu_pd
+    public final void vmovupd(Register dst, AMD64Address src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 10 /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x10);
+        emitOperandHelper(dst, src, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
+    // _mm512_storeu_pd
+    public final void vmovupd(AMD64Address dst, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 10 /r
+        evexPrefix(src, Register.None, Register.None, dst, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x11);
+        emitOperandHelper(src, dst, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
     // _mm512_add_epi32
     public final void vpaddd(Register dst, Register nds, Register src) {
         assert supports(CPUFeature.AVX512F);
@@ -4421,6 +4439,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(dst, src);
     }
 
+    // _mm512_mul_pid
+    public final void vmulpd(Register dst, Register nds, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W0 FA /r
+        evexPrefix(dst, Register.None, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x59);
+        emitModRM(dst, src);
+    }
+
     // _mm512_mask_mov_epi32
     public final void vmovdqa32(Register dst, Register src) {
         assert supports(CPUFeature.AVX512F);
@@ -4430,12 +4457,30 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(dst, src);
     }
 
+    // _mm512_mask_mov_pd
+    public final void vmovapd(Register dst, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 28 /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x28);
+        emitModRM(dst, src);
+    }
+
     // _mm512_set1_epi32
     public final void vpbroadcastd(Register dst, Register src) {
         assert supports(CPUFeature.AVX512F);
         // Code: EVEX.512.66.0F38.W0 7C /r
         evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W0, Z0, B0);
         emitByte(0x7C);
+        emitModRM(dst, src);
+    }
+
+    // vbroadcastsd
+    public final void vbroadcastsd(Register dst, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W1 19 /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0x19);
         emitModRM(dst, src);
     }
 

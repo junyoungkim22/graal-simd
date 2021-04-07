@@ -464,5 +464,11 @@ public final class CompilerDirectives {
         }
     }
 
+    public static void simdDoubleMult(int inputOffset, double multVal, double[] input, double[] output) {
+        for(int i = inputOffset; i < inputOffset + 8; i++) {
+            output[i] = input[i] * multVal;
+        }
+    }
+
 
 }
