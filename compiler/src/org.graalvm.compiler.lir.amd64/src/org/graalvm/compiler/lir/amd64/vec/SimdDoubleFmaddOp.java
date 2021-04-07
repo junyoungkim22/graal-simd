@@ -24,9 +24,9 @@ import jdk.vm.ci.code.Register;
 import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.Value;
 
-@Opcode("SIMDDOUBLEMULT")
-public final class SimdDoubleMultOp extends AMD64LIRInstruction {
-    public static final LIRInstructionClass<SimdDoubleMultOp> TYPE = LIRInstructionClass.create(SimdDoubleMultOp.class);
+@Opcode("SIMDDOUBLEFMADD")
+public final class SimdDoubleFmaddOp extends AMD64LIRInstruction {
+    public static final LIRInstructionClass<SimdDoubleFmaddOp> TYPE = LIRInstructionClass.create(SimdDoubleFmaddOp.class);
 
     private final int DOUBLE_ARRAY_BASE_OFFSET;
     private final Scale DOUBLE_ARRAY_INDEX_SCALE;
@@ -40,7 +40,7 @@ public final class SimdDoubleMultOp extends AMD64LIRInstruction {
 
     @Temp({REG}) private Value broadcastMultValValue;
 
-    public SimdDoubleMultOp(LIRGeneratorTool tool, Value inputOffset, Value multVal, Value input, Value output) {
+    public SimdDoubleFmaddOp(LIRGeneratorTool tool, Value inputOffset, Value multVal, Value input, Value output) {
         super(TYPE);
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
         DOUBLE_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Double)));

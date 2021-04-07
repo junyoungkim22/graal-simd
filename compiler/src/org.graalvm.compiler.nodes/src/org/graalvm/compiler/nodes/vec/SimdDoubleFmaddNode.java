@@ -12,15 +12,15 @@ import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 @NodeInfo(cycles = CYCLES_1, size = SIZE_1)
-public final class SimdDoubleMultNode extends FixedWithNextNode implements LIRLowerable {
-    public static final NodeClass<SimdDoubleMultNode> TYPE = NodeClass.create(SimdDoubleMultNode.class);
+public final class SimdDoubleFmaddNode extends FixedWithNextNode implements LIRLowerable {
+    public static final NodeClass<SimdDoubleFmaddNode> TYPE = NodeClass.create(SimdDoubleFmaddNode.class);
 
     @Input ValueNode inputOffset;
     @Input ValueNode multVal;
     @Input ValueNode input;
     @Input ValueNode output;
 
-    public SimdDoubleMultNode(ValueNode inputOffset, ValueNode multVal, ValueNode input, ValueNode output) {
+    public SimdDoubleFmaddNode(ValueNode inputOffset, ValueNode multVal, ValueNode input, ValueNode output) {
         super(TYPE, StampFactory.forVoid());
         this.inputOffset = inputOffset;
         this.multVal = multVal;
@@ -30,6 +30,6 @@ public final class SimdDoubleMultNode extends FixedWithNextNode implements LIRLo
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
-        gen.getLIRGeneratorTool().emitSimdDoubleMult(gen.operand(inputOffset), gen.operand(multVal), gen.operand(input), gen.operand(output));
+        gen.getLIRGeneratorTool().emitSimdDoubleFmadd(gen.operand(inputOffset), gen.operand(multVal), gen.operand(input), gen.operand(output));
     }
 }

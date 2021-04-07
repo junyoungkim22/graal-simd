@@ -77,7 +77,7 @@ import org.graalvm.compiler.nodes.java.InstanceOfDynamicNode;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
 import org.graalvm.compiler.nodes.type.StampTool;
 import org.graalvm.compiler.nodes.vec.AggregateNode;
-import org.graalvm.compiler.nodes.vec.SimdDoubleMultNode;
+import org.graalvm.compiler.nodes.vec.SimdDoubleFmaddNode;
 import org.graalvm.compiler.nodes.virtual.EnsureVirtualizedNode;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.replacements.nodes.arithmetic.UnsignedMulHighNode;
@@ -375,10 +375,10 @@ public class TruffleGraphBuilderPlugins {
                 return true;
             }
         });
-        r.register4("simdDoubleMult", int.class, double.class, double[].class, double[].class, new InvocationPlugin() {
+        r.register4("simdDoubleFmadd", int.class, double.class, double[].class, double[].class, new InvocationPlugin() {
             @Override
             public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode inputOffset, ValueNode multVal, ValueNode input, ValueNode output) {
-                b.add(new SimdDoubleMultNode(inputOffset, multVal, input, output));
+                b.add(new SimdDoubleFmaddNode(inputOffset, multVal, input, output));
                 return true;
             }
         });
