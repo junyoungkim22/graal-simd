@@ -4430,6 +4430,24 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(dst, b, 0, EVEXTuple.FV_NO_BROADCAST_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    // _mm512_add_pd
+    public final void vaddpd(Register dst, Register a, AMD64Address b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 58 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x58);
+        emitOperandHelper(dst, b, 0, EVEXTuple.FV_NO_BROADCAST_64BIT.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
+    // _mm512_fmadd_pd
+    public final void vfmadd213pd(Register dst, Register a, AMD64Address b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W1 A8 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xA8);
+        emitOperandHelper(dst, b, 0, EVEXTuple.FV_NO_BROADCAST_64BIT.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
     // _mm512_sub_epi32
     public final void vpsubd(Register dst, Register nds, Register src) {
         assert supports(CPUFeature.AVX512F);

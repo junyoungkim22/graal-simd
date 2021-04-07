@@ -71,16 +71,15 @@ public final class SimdDoubleMultOp extends AMD64LIRInstruction {
         AMD64Address inputAddress = new AMD64Address(input, inputOffset, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
         masm.vmovupd(inValues, inputAddress);
 
+        AMD64Address outputAddress = new AMD64Address(output, inputOffset, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
 
         // Make a vector of multVal
-        Register broadcastMultVal = asRegister(broadcastMultValValue);
-        masm.vbroadcastsd(broadcastMultVal, multVal);
+        masm.vbroadcastsd(result, multVal);
 
-        // Store multiplication results in result
-        masm.vmulpd(result, inValues, broadcastMultVal);
+        // Store computation results in result
+        masm.vfmadd213pd(result, inValues, outputAddress);
 
         // Store result to output
-        AMD64Address outputAddress = new AMD64Address(output, inputOffset, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
         masm.vmovupd(outputAddress, result);
     }
 }
