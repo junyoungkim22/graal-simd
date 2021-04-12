@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
@@ -58,6 +59,7 @@ import org.graalvm.compiler.graph.NodeSourcePosition;
 import org.graalvm.compiler.nodes.calc.FloatingNode;
 import org.graalvm.compiler.nodes.cfg.Block;
 import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
+import org.graalvm.compiler.nodes.java.ExceptionObjectNode;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
 import org.graalvm.compiler.nodes.spi.VirtualizableAllocation;
 import org.graalvm.compiler.nodes.util.GraphUtil;
@@ -149,6 +151,20 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
         }
     }
 
+    /**
+     * Different stages of the compilation regarding the status of various graph properties.
+     */
+    public enum StageFlag {
+        PARTIAL_ESCAPE,
+        HIGH_TIER,
+        FLOATING_READS,
+        GUARD_MOVEMENT,
+        FIXED_READS,
+        VALUE_PROXY_REMOVAL,
+        EXPAND_LOGIC,
+        FINAL_CANONICALIZATION
+    }
+
     public static class ScheduleResult {
         private final ControlFlowGraph cfg;
         private final NodeMap<Block> nodeToBlockMap;
@@ -226,7 +242,7 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
         }
 
         /**
-         * @see StructuredGraph#isSubstitution
+         * @see StructuredGraph#isSubstitution()
          */
         public Builder setIsSubstitution(boolean flag) {
             this.isSubstitution = flag;
@@ -342,10 +358,7 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
     private final CompilationIdentifier compilationId;
     private final int entryBCI;
     private GuardsStage guardsStage = GuardsStage.FLOATING_GUARDS;
-    private boolean isAfterFloatingReadPhase = false;
-    private boolean isAfterFixedReadPhase = false;
-    private boolean hasValueProxies = true;
-    private boolean isAfterExpandLogic = false;
+    private EnumSet<StageFlag> stageFlags = EnumSet.noneOf(StageFlag.class);
     private FrameStateVerification frameStateVerification;
 
     /**
@@ -519,6 +532,34 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
     }
 
     @Override
+    public void getDebugProperties(Map<Object, Object> properties) {
+        super.getDebugProperties(properties);
+        properties.put("compilationIdentifier", compilationId());
+        properties.put("assumptions", String.valueOf(getAssumptions()));
+    }
+
+    @Override
+    public void beforeNodeDuplication(Graph sourceGraph) {
+        super.beforeNodeDuplication(sourceGraph);
+        recordAssumptions((StructuredGraph) sourceGraph);
+    }
+
+    @Override
+    protected Object beforeNodeIdChange(Node node) {
+        if (node instanceof Invokable) {
+            return inliningLog.removeLeafCallsite((Invokable) node);
+        }
+        return null;
+    }
+
+    @Override
+    protected void afterNodeIdChange(Node node, Object value) {
+        if (node instanceof Invokable) {
+            inliningLog.addLeafCallsite((Invokable) node, (InliningLog.Callsite) value);
+        }
+    }
+
+    @Override
     public boolean maybeCompress() {
         if (super.maybeCompress()) {
             /*
@@ -660,9 +701,7 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
         }
         copy.hasUnsafeAccess = hasUnsafeAccess;
         copy.setGuardsStage(getGuardsStage());
-        copy.isAfterFloatingReadPhase = isAfterFloatingReadPhase;
-        copy.hasValueProxies = hasValueProxies;
-        copy.isAfterExpandLogic = isAfterExpandLogic;
+        copy.stageFlags = EnumSet.copyOf(stageFlags);
         copy.trackNodeSourcePosition = trackNodeSourcePosition;
         if (fields != null) {
             copy.fields = createFieldSet(fields);
@@ -943,39 +982,21 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
         this.guardsStage = guardsStage;
     }
 
-    public boolean isAfterFloatingReadPhase() {
-        return isAfterFloatingReadPhase;
+    public boolean isAfterStage(StageFlag state) {
+        return stageFlags.contains(state);
     }
 
-    public boolean isAfterFixedReadPhase() {
-        return isAfterFixedReadPhase;
+    public boolean isBeforeStage(StageFlag state) {
+        return !isAfterStage(state);
     }
 
-    public void setAfterFloatingReadPhase(boolean state) {
-        assert state : "cannot 'unapply' floating read phase on graph";
-        isAfterFloatingReadPhase = state;
+    public void setAfterStage(StageFlag state) {
+        assert isBeforeStage(state) : "Cannot set after state " + state + " since the graph is already in that state";
+        stageFlags.add(state);
     }
 
-    public void setAfterFixReadPhase(boolean state) {
-        assert state : "cannot 'unapply' fix reads phase on graph";
-        isAfterFixedReadPhase = state;
-    }
-
-    public boolean hasValueProxies() {
-        return hasValueProxies;
-    }
-
-    public void setHasValueProxies(boolean state) {
-        assert !state : "cannot 'unapply' value proxy removal on graph";
-        hasValueProxies = state;
-    }
-
-    public boolean isAfterExpandLogic() {
-        return isAfterExpandLogic;
-    }
-
-    public void setAfterExpandLogic() {
-        isAfterExpandLogic = true;
+    public EnumSet<StageFlag> getStageFlags() {
+        return stageFlags;
     }
 
     /**
@@ -1030,6 +1051,16 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
      */
     public AllowAssumptions allowAssumptions() {
         return AllowAssumptions.ifNonNull(assumptions);
+    }
+
+    public void recordAssumptions(StructuredGraph inlineGraph) {
+        if (getAssumptions() != null) {
+            if (this != inlineGraph && inlineGraph.getAssumptions() != null) {
+                getAssumptions().record(inlineGraph.getAssumptions());
+            }
+        } else {
+            assert inlineGraph.getAssumptions() == null : String.format("cannot inline graph (%s) which makes assumptions into a graph (%s) that doesn't", inlineGraph, this);
+        }
     }
 
     /**
@@ -1212,6 +1243,7 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
             if (node instanceof StateSplit) {
                 FrameState stateAfter = ((StateSplit) node).stateAfter();
                 if (stateAfter != null) {
+                    assert !(node instanceof ExceptionObjectNode) : "ExceptionObjects cannot have a null FrameState";
                     ((StateSplit) node).setStateAfter(null);
                     // 2 nodes referencing the same frame state
                     if (stateAfter.isAlive()) {
@@ -1233,7 +1265,7 @@ public final class StructuredGraph extends Graph implements JavaMethodContext {
 
     @Override
     protected void afterRegister(Node node) {
-        assert hasValueProxies() || !(node instanceof ValueProxyNode);
+        assert !isAfterStage(StageFlag.VALUE_PROXY_REMOVAL) || !(node instanceof ValueProxyNode);
         if (GraalOptions.TraceInlining.getValue(getOptions())) {
             if (node instanceof Invokable) {
                 ((Invokable) node).updateInliningLogAfterRegister(this);

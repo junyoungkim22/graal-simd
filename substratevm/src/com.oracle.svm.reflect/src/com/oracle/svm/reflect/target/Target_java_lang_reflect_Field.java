@@ -69,7 +69,7 @@ public final class Target_java_lang_reflect_Field {
     Target_java_lang_reflect_Field root;
 
     @Inject @RecomputeFieldValue(kind = Kind.Custom, declClass = FieldOffsetComputer.class) //
-    int offset;
+    public int offset;
 
     @Inject @RecomputeFieldValue(kind = Kind.Custom, declClass = AnnotatedTypeComputer.class) //
     AnnotatedType annotatedType;
@@ -78,7 +78,7 @@ public final class Target_java_lang_reflect_Field {
     native Target_java_lang_reflect_Field copy();
 
     @Substitute
-    Target_jdk_internal_reflect_FieldAccessor acquireFieldAccessor(@SuppressWarnings("unused") boolean overrideFinalCheck) {
+    public Target_jdk_internal_reflect_FieldAccessor acquireFieldAccessor(@SuppressWarnings("unused") boolean overrideFinalCheck) {
         if (fieldAccessor == null) {
             throw VMError.unsupportedFeature("Runtime reflection is not supported.");
         }

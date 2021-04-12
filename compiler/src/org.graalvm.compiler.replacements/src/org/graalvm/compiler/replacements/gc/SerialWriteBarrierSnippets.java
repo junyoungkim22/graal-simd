@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -128,7 +128,7 @@ public abstract class SerialWriteBarrierSnippets extends WriteBarrierSnippets im
             args.addConst("counters", counters);
             args.addConst("verifyOnly", barrier.getVerifyOnly());
 
-            templates.template(barrier, args).instantiate(templates.getProviders().getMetaAccess(), barrier, DEFAULT_REPLACER, args);
+            templates.template(barrier, args).instantiate(templates.getMetaAccess(), barrier, DEFAULT_REPLACER, args);
         }
 
         public void lower(AbstractTemplates templates, SnippetInfo snippet, SerialArrayRangeWriteBarrier barrier, LoweringTool tool) {
@@ -137,7 +137,7 @@ public abstract class SerialWriteBarrierSnippets extends WriteBarrierSnippets im
             args.add("length", barrier.getLength());
             args.addConst("elementStride", barrier.getElementStride());
 
-            templates.template(barrier, args).instantiate(templates.getProviders().getMetaAccess(), barrier, DEFAULT_REPLACER, args);
+            templates.template(barrier, args).instantiate(templates.getMetaAccess(), barrier, DEFAULT_REPLACER, args);
         }
     }
 }

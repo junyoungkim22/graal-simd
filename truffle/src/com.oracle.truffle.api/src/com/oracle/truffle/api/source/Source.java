@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -45,6 +45,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -149,6 +150,7 @@ public abstract class Source {
      */
     public static final CharSequence CONTENT_NONE = null;
     private static final CharSequence CONTENT_UNSET = new String();
+    private static final byte[] CONTENT_EMPTY = new byte[0];
 
     private static final Source EMPTY = new SourceImpl.ImmutableKey(null, null, null, null, null, null, null, false, false, false, null).toSourceNotInterned();
     private static final String NO_FASTPATH_SUBSOURCE_CREATION_MESSAGE = "do not create sub sources from compiled code";
@@ -157,13 +159,24 @@ public abstract class Source {
     private static final int BUFFER_SIZE = 8192;
     static final Class<?> BYTE_SEQUENCE_CLASS = ByteSequence.create(new byte[0]).getClass();
 
-    private static final InternedSources SOURCES = new InternedSources();
+    static final InternedSources SOURCES = new InternedSources();
 
     private volatile TextMap textMap;
     private volatile URI computedURI;
-    volatile org.graalvm.polyglot.Source polyglotSource;
+    /*
+     * We use the original polyglot source as an e polyglot embedding API indicato whether we should
+     * continue to hold on to caches(ASTs, code) related to this source. If this reference is strong
+     * it would keep that polyglot reference potentially always alive, because Truffle sources are
+     * interned.
+     *
+     * If no one is referencing the polyglot source anymore we can assume that no one relies on the
+     * identity of the original polyglot source. So we can just as well free it.
+     */
+    volatile WeakReference<org.graalvm.polyglot.Source> cachedPolyglotSource;
 
     abstract Object getSourceId();
+
+    abstract Object getSourceKey();
 
     Source() {
     }
@@ -259,7 +272,11 @@ public abstract class Source {
         if (!(obj instanceof Source)) {
             return false;
         }
-        return getSourceId().equals(((Source) obj).getSourceId());
+
+        boolean result = getSourceId().equals(((Source) obj).getSourceId());
+        // Can be turned into "result == ..." once GR-26875 is fixed
+        assert !result || getSourceKey().equals(((Source) obj).getSourceKey());
+        return result;
     }
 
     /**
@@ -372,7 +389,14 @@ public abstract class Source {
         if (uri == null) {
             uri = computedURI;
             if (uri == null) {
-                byte[] bytes = hasBytes() ? getBytes().toByteArray() : getCharacters().toString().getBytes();
+                byte[] bytes;
+                if (hasBytes()) {
+                    bytes = getBytes().toByteArray();
+                } else if (hasCharacters()) {
+                    bytes = getCharacters().toString().getBytes();
+                } else {
+                    bytes = CONTENT_EMPTY;
+                }
                 uri = computedURI = getNamedURI(getName(), bytes);
             }
         }
@@ -1018,7 +1042,8 @@ public abstract class Source {
                 useTruffleFile = useTruffleFile.exists() ? useTruffleFile.getCanonicalFile() : useTruffleFile;
                 if (useContent == CONTENT_UNSET) {
                     if (isCharacterBased(useFileSystemContext, language, useMimeType)) {
-                        useEncoding = useEncoding == null ? findEncoding(useTruffleFile, useMimeType) : useEncoding;
+                        String fileMimeType = useMimeType == null ? SourceAccessor.detectMimeType(useTruffleFile, getValidMimeTypes(useFileSystemContext, language)) : useMimeType;
+                        useEncoding = useEncoding == null ? findEncoding(useTruffleFile, fileMimeType) : useEncoding;
                         useContent = read(useTruffleFile, useEncoding);
                     } else {
                         useContent = ByteSequence.create(useTruffleFile.readAllBytes());
@@ -1266,7 +1291,7 @@ public abstract class Source {
     }
 
     private static Charset findEncoding(TruffleFile file, String mimeType) {
-        Charset encoding = SourceAccessor.detectEncoding(file, mimeType);
+        Charset encoding = mimeType == null ? null : SourceAccessor.detectEncoding(file, mimeType);
         encoding = encoding == null ? StandardCharsets.UTF_8 : encoding;
         return encoding;
     }

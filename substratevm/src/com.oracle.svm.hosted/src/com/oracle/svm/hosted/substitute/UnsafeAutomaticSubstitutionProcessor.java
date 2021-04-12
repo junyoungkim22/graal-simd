@@ -74,6 +74,7 @@ import org.graalvm.nativeimage.hosted.Feature;
 
 import com.oracle.graal.pointsto.infrastructure.SubstitutionProcessor;
 import com.oracle.graal.pointsto.meta.AnalysisType;
+import com.oracle.svm.core.ParsingReason;
 import com.oracle.svm.core.annotate.AutomaticFeature;
 import com.oracle.svm.core.annotate.RecomputeFieldValue;
 import com.oracle.svm.core.annotate.RecomputeFieldValue.Kind;
@@ -149,7 +150,7 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
         this.suppressWarnings = new ArrayList<>();
     }
 
-    public void init(ImageClassLoader loader, MetaAccessProvider originalMetaAccess, SVMHost hostVM) {
+    public void init(ImageClassLoader loader, MetaAccessProvider originalMetaAccess) {
         ResolvedJavaMethod atomicIntegerFieldUpdaterNewUpdaterMethod;
         ResolvedJavaMethod atomicLongFieldUpdaterNewUpdaterMethod;
         ResolvedJavaMethod atomicReferenceFieldUpdaterNewUpdaterMethod;
@@ -174,7 +175,7 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
                  * intrinsified to simple array and field access nodes in
                  * IntrinsifyMethodHandlesInvocationPlugin.
                  */
-                for (Method method : loader.findClassByName("java.lang.invoke.VarHandles", true).getDeclaredMethods()) {
+                for (Method method : loader.findClassOrFail("java.lang.invoke.VarHandles").getDeclaredMethods()) {
                     neverInlineSet.add(originalMetaAccess.lookupJavaMethod(method));
                 }
             }
@@ -253,9 +254,11 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
 
         plugins = new Plugins(new InvocationPlugins());
         plugins.appendInlineInvokePlugin(inlineInvokePlugin);
-        plugins.setClassInitializationPlugin(new NoClassInitializationPlugin());
+        NoClassInitializationPlugin classInitializationPlugin = new NoClassInitializationPlugin();
+        plugins.setClassInitializationPlugin(classInitializationPlugin);
 
-        ReflectionPlugins.registerInvocationPlugins(loader, snippetReflection, annotationSubstitutions, plugins.getInvocationPlugins(), hostVM, false, false);
+        ReflectionPlugins.registerInvocationPlugins(loader, snippetReflection, annotationSubstitutions, classInitializationPlugin, plugins.getInvocationPlugins(), null,
+                        ParsingReason.UnsafeSubstitutionAnalysis);
 
         /*
          * Analyzing certain classes leads to false errors. We disable reporting for those classes
@@ -287,7 +290,9 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
 
                 switch (cvField.getRecomputeValueKind()) {
                     case FieldOffset:
-                        if (access.registerAsUnsafeAccessed(access.getMetaAccess().lookupJavaField(cvField.getTargetField()))) {
+                        Field targetField = cvField.getTargetField();
+                        access.getMetaAccess().lookupJavaType(targetField.getDeclaringClass()).registerAsReachable();
+                        if (access.registerAsUnsafeAccessed(access.getMetaAccess().lookupJavaField(targetField))) {
                             access.requireAnalysisIteration();
                         }
                         break;
@@ -341,13 +346,10 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
         ResolvedJavaMethod clinit = hostType.getClassInitializer();
 
         if (clinit != null && clinit.hasBytecodes()) {
-            /* The following directive links the class and makes clinit available. */
-            try {
-                hostType.getDeclaredConstructors();
-            } catch (NoClassDefFoundError | VerifyError t) {
-                /* This code should be non-intrusive so we just ignore. */
-                return;
-            }
+            /*
+             * Since this analysis is run after the AnalysisType is created at this point the class
+             * should already be linked and clinit should be available.
+             */
             DebugContext debug = new Builder(options).build();
             try (DebugContext.Scope s = debug.scope("Field offset computation", clinit)) {
                 StructuredGraph clinitGraph = getStaticInitializerGraph(clinit, options, debug);
@@ -1049,7 +1051,7 @@ public class UnsafeAutomaticSubstitutionProcessor extends SubstitutionProcessor 
          * We know that the Unsafe methods that we look for don't throw any checked exceptions.
          * Replace the InvokeWithExceptionNode with InvokeNode.
          */
-        for (InvokeWithExceptionNode invoke : graph.getNodes().filter(InvokeWithExceptionNode.class)) {
+        for (InvokeWithExceptionNode invoke : graph.getNodes(InvokeWithExceptionNode.TYPE)) {
             if (noCheckedExceptionsSet.contains(invoke.callTarget().targetMethod())) {
                 invoke.replaceWithInvoke();
             }

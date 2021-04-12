@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -49,7 +49,7 @@ final class PolyglotThread extends Thread {
 
     private final PolyglotLanguageContext languageContext;
 
-    Object context;
+    PolyglotContextImpl context;
 
     final CallTarget callTarget;
 
@@ -128,8 +128,7 @@ final class PolyglotThread extends Thread {
         protected Object executeImpl(PolyglotLanguageContext languageContext, Object receiver, Object[] args) {
             PolyglotThread thread = (PolyglotThread) receiver;
             PolyglotThreadRunnable run = (PolyglotThreadRunnable) args[HostToGuestRootNode.ARGUMENT_OFFSET];
-
-            Object prev;
+            PolyglotContextImpl prev;
             try {
                 prev = languageContext.enterThread(thread);
             } catch (PolyglotEngineException polyglotException) {
@@ -143,7 +142,7 @@ final class PolyglotThread extends Thread {
             try {
                 run.execute();
             } finally {
-                languageContext.leaveThread(prev, thread);
+                languageContext.leaveAndDisposePolyglotThread(prev, thread);
             }
             return null;
         }

@@ -39,6 +39,9 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 
+import com.oracle.svm.core.thread.JavaContinuations;
+import com.oracle.svm.core.threadlocal.FastThreadLocalFactory;
+import com.oracle.svm.core.threadlocal.FastThreadLocalInt;
 import org.graalvm.compiler.core.common.SuppressFBWarnings;
 import org.graalvm.compiler.serviceprovider.GraalUnsafeAccess;
 import org.graalvm.compiler.word.BarrieredAccess;
@@ -61,7 +64,6 @@ import com.oracle.svm.core.snippets.SubstrateForeignCallTarget;
 import com.oracle.svm.core.stack.StackOverflowCheck;
 import com.oracle.svm.core.thread.JavaThreads;
 import com.oracle.svm.core.thread.ThreadStatus;
-import com.oracle.svm.core.thread.ThreadingSupportImpl;
 import com.oracle.svm.core.thread.VMOperationControl;
 import com.oracle.svm.core.util.VMError;
 
@@ -93,6 +95,24 @@ import sun.misc.Unsafe;
 public class MultiThreadedMonitorSupport extends MonitorSupport {
 
     private static final Unsafe UNSAFE = GraalUnsafeAccess.getUnsafe();
+
+    /**
+     * This is only used for preempting a continuation in the experimental Loom JDK support. There's
+     * performance impact in this solution.
+     */
+    protected static final FastThreadLocalInt lockedMonitors = FastThreadLocalFactory.createInt();
+
+    protected static void onMonitorLocked() {
+        if (JavaContinuations.useLoom()) {
+            lockedMonitors.set(lockedMonitors.get() + 1);
+        }
+    }
+
+    protected static void onMonitorUnlocked() {
+        if (JavaContinuations.useLoom()) {
+            lockedMonitors.set(lockedMonitors.get() - 1);
+        }
+    }
 
     /**
      * Types that are used to implement the secondary storage for monitor slots cannot themselves
@@ -194,7 +214,6 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
          * zone prevents stack overflows.
          */
         StackOverflowCheck.singleton().makeYellowZoneAvailable();
-        ThreadingSupportImpl.pauseRecurringCallback("No exception must flow out of the monitor code.");
         VMOperationControl.guaranteeOkayToBlock("No Java synchronization must be performed within a VMOperation: if the object is already locked, the VM is deadlocked");
         try {
             singleton().monitorEnter(obj);
@@ -221,7 +240,6 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
             throw VMError.shouldNotReachHere("Unexpected exception in MonitorSupport.monitorEnter", ex);
 
         } finally {
-            ThreadingSupportImpl.resumeRecurringCallbackAtNextSafepoint();
             StackOverflowCheck.singleton().protectYellowZone();
         }
     }
@@ -233,13 +251,14 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
     public void monitorEnter(Object obj) {
         ReentrantLock lockObject = getOrCreateMonitor(obj, true);
         lockObject.lock();
+
+        onMonitorLocked();
     }
 
     @SubstrateForeignCallTarget(stubCallingConvention = false)
     @Uninterruptible(reason = "Avoid stack overflow error before yellow zone has been activated", calleeMustBe = false)
     private static void slowPathMonitorExit(Object obj) {
         StackOverflowCheck.singleton().makeYellowZoneAvailable();
-        ThreadingSupportImpl.pauseRecurringCallback("No exception must flow out of the monitor code.");
         try {
             singleton().monitorExit(obj);
 
@@ -262,7 +281,6 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
             throw VMError.shouldNotReachHere("Unexpected exception in MonitorSupport.monitorExit", ex);
 
         } finally {
-            ThreadingSupportImpl.resumeRecurringCallbackAtNextSafepoint();
             StackOverflowCheck.singleton().protectYellowZone();
         }
     }
@@ -272,6 +290,8 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
     public void monitorExit(Object obj) {
         ReentrantLock lockObject = getOrCreateMonitor(obj, true);
         lockObject.unlock();
+
+        onMonitorUnlocked();
     }
 
     @Override
@@ -340,6 +360,12 @@ public class MultiThreadedMonitorSupport extends MonitorSupport {
     public boolean isLockedByAnyThread(Object obj) {
         ReentrantLock lockObject = getOrCreateMonitor(obj, false);
         return lockObject != null && lockObject.isLocked();
+    }
+
+    @Override
+    public int countThreadLock(IsolateThread vmThread) {
+        VMError.guarantee(JavaContinuations.useLoom(), "This method is only supported when continuations are enabled.");
+        return lockedMonitors.get(vmThread);
     }
 
     @SuppressFBWarnings(value = {"WA_AWAIT_NOT_IN_LOOP"}, justification = "This method is a wait implementation.")

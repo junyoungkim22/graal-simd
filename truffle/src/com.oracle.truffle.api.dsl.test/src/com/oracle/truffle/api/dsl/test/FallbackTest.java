@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -631,6 +631,32 @@ public class FallbackTest {
         @Fallback
         protected String f0(Object n) {
             return "fallback";
+        }
+
+    }
+
+    /*
+     * This forces the frame to be used in the fallback guard and that might trigger compilation
+     * problems.
+     */
+    @SuppressWarnings("unused")
+    public abstract static class FrameInFallbackTestNode extends Node {
+
+        public abstract String execute(VirtualFrame frame, Object left);
+
+        static boolean guardWithFrame(VirtualFrame frame) {
+            return true;
+        }
+
+        @Specialization(guards = "guardWithFrame(frame)")
+        protected String s0(VirtualFrame frame,
+                        int arg0) {
+            return "s0";
+        }
+
+        @Fallback
+        protected String f0(Object arg0) {
+            return "f0";
         }
 
     }

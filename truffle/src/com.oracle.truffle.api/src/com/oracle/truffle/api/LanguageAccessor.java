@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -102,6 +102,10 @@ final class LanguageAccessor extends Accessor {
         return ACCESSOR.interopSupport();
     }
 
+    static ExceptionSupport exceptionAccess() {
+        return ACCESSOR.exceptionSupport();
+    }
+
     static IOSupport ioAccess() {
         return ACCESSOR.ioSupport();
     }
@@ -179,6 +183,11 @@ final class LanguageAccessor extends Accessor {
         }
 
         @Override
+        public Object getPolyglotLanguageContext(Env env) {
+            return env.getPolyglotLanguageContext();
+        }
+
+        @Override
         public Object getFileSystemContext(TruffleFile file) {
             return file.getFileSystemContext();
         }
@@ -200,13 +209,27 @@ final class LanguageAccessor extends Accessor {
         }
 
         @Override
-        public Object getScopedView(Env env, Node location, Frame frame, Object value) {
+        @SuppressWarnings("deprecation")
+        public Object getLegacyScopedView(Env env, Node location, Frame frame, Object value) {
             Object c = env.getLanguageContext();
             if (c == TruffleLanguage.Env.UNSET_CONTEXT) {
                 CompilerDirectives.transferToInterpreter();
                 return value;
             } else {
                 return env.getSpi().getScopedView(c, location, frame, value);
+            }
+        }
+
+        @Override
+        public Object getScope(Env env) {
+            Object c = env.getLanguageContext();
+            if (c == TruffleLanguage.Env.UNSET_CONTEXT) {
+                CompilerDirectives.transferToInterpreter();
+                return null;
+            } else {
+                Object result = env.getSpi().getScope(c);
+                assert ACCESSOR.interopSupport().isScopeObject(result) : String.format("%s is not a scope", result);
+                return result;
             }
         }
 
@@ -413,11 +436,13 @@ final class LanguageAccessor extends Accessor {
         }
 
         @Override
-        public Iterable<Scope> findLocalScopes(TruffleLanguage.Env env, Node node, Frame frame) {
+        @SuppressWarnings("deprecation")
+        public Iterable<Scope> findLegacyLocalScopes(TruffleLanguage.Env env, Node node, Frame frame) {
             return env.findLocalScopes(node, frame);
         }
 
         @Override
+        @SuppressWarnings("deprecation")
         public Iterable<Scope> findTopScopes(TruffleLanguage.Env env) {
             return env.findTopScopes();
         }
@@ -486,8 +511,10 @@ final class LanguageAccessor extends Accessor {
 
         @Override
         public Charset detectEncoding(TruffleFile file, String mimeType) {
-            String useMimeType = mimeType == null ? file.detectMimeType() : mimeType;
-            return useMimeType == null ? null : file.detectEncoding(useMimeType);
+            if (mimeType == null) {
+                throw new IllegalArgumentException("MimeType must be non null.");
+            }
+            return file.detectEncoding(mimeType);
         }
 
         @Override
@@ -549,6 +576,11 @@ final class LanguageAccessor extends Accessor {
         }
 
         @Override
+        public Object getLoggersSPI(Object loggerCache) {
+            return ((TruffleLogger.LoggerCache) loggerCache).getSPI();
+        }
+
+        @Override
         public void closeEngineLoggers(Object loggers) {
             ((TruffleLogger.LoggerCache) loggers).close();
         }
@@ -559,11 +591,6 @@ final class LanguageAccessor extends Accessor {
         }
 
         @Override
-        public SecurityException throwSecurityException(String message) {
-            throw new TruffleSecurityException(message);
-        }
-
-        @Override
         public FileSystem getFileSystem(TruffleFile truffleFile) {
             return truffleFile.getSPIFileSystem();
         }
@@ -571,6 +598,21 @@ final class LanguageAccessor extends Accessor {
         @Override
         public Path getPath(TruffleFile truffleFile) {
             return truffleFile.getSPIPath();
+        }
+
+        @Override
+        public boolean isSynchronousTLAction(ThreadLocalAction action) {
+            return action.isSynchronous();
+        }
+
+        @Override
+        public boolean isSideEffectingTLAction(ThreadLocalAction action) {
+            return action.hasSideEffects();
+        }
+
+        @Override
+        public void performTLAction(ThreadLocalAction action, ThreadLocalAction.Access access) {
+            action.perform(access);
         }
 
     }

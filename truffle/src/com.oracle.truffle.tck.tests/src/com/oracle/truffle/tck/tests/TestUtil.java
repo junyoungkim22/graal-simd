@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -54,6 +54,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.SourceSection;
 import org.graalvm.polyglot.Value;
@@ -72,7 +74,21 @@ final class TestUtil {
         throw new IllegalStateException("No instance allowed.");
     }
 
+    static void assertNoCurrentContext() {
+        try {
+            Context ctx = Context.getCurrent();
+            throw new AssertionError(String.format(
+                            "Context cannot be explicitly entered while running TCK tests. Entered context: 0x%x", ctx.hashCode()));
+        } catch (IllegalStateException e) {
+            // No context entered.
+        }
+    }
+
     static Set<? extends String> getRequiredLanguages(final TestContext context) {
+        Set<String> installedProviders = context.getInstalledProviders().keySet();
+        if (LANGUAGE != null && !installedProviders.contains(LANGUAGE)) {
+            throw providerNotFound("tck.language", Collections.singleton(LANGUAGE), installedProviders);
+        }
         return filterLanguages(
                         context,
                         LANGUAGE == null ? null : new Predicate<String>() {
@@ -88,6 +104,11 @@ final class TestUtil {
         if (VALUES != null) {
             final Set<String> requiredValues = new HashSet<>();
             Collections.addAll(requiredValues, VALUES.split(","));
+            Set<String> installedProviders = context.getInstalledProviders().keySet();
+            if (!installedProviders.containsAll(requiredValues)) {
+                requiredValues.removeAll(installedProviders);
+                throw providerNotFound("tck.values", requiredValues, installedProviders);
+            }
             predicate = new Predicate<String>() {
                 @Override
                 public boolean test(String lang) {
@@ -260,6 +281,15 @@ final class TestUtil {
                     final Predicate<String> predicte) {
         final Set<? extends String> installedLangs = context.getInstalledProviders().keySet();
         return predicte == null ? installedLangs : installedLangs.stream().filter(predicte).collect(Collectors.toSet());
+    }
+
+    private static IllegalStateException providerNotFound(String property, Set<String> providerIds, Set<String> installedProviders) {
+        throw new IllegalStateException(String.format(
+                        "Following providers %s required by the '%s' property are not installed.%n" +
+                                        "Installed providers are %s",
+                        String.join(", ", providerIds),
+                        property,
+                        String.join(", ", installedProviders)));
     }
 
     abstract static class CollectingMatcher<T> extends BaseMatcher<T> implements Consumer<Map.Entry<T, Boolean>> {

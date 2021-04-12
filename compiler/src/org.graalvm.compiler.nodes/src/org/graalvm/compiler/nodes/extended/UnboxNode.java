@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 package org.graalvm.compiler.nodes.extended;
 
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_2;
-import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_2;
+import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_16;
 
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.graph.NodeClass;
@@ -40,6 +40,7 @@ import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.Virtualizable;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
 import org.graalvm.compiler.nodes.type.StampTool;
+import org.graalvm.compiler.nodes.util.GraphUtil;
 import org.graalvm.compiler.nodes.virtual.VirtualObjectNode;
 
 import jdk.vm.ci.meta.ConstantReflectionProvider;
@@ -48,7 +49,7 @@ import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.meta.ResolvedJavaType;
 
-@NodeInfo(cycles = CYCLES_2, size = SIZE_2, allowedUsageTypes = {InputType.Memory, InputType.Value})
+@NodeInfo(cycles = CYCLES_2, size = SIZE_16, allowedUsageTypes = {InputType.Memory, InputType.Value})
 public final class UnboxNode extends AbstractBoxingNode implements Virtualizable, Lowerable, Canonicalizable.Unary<ValueNode> {
 
     public static final NodeClass<UnboxNode> TYPE = NodeClass.create(UnboxNode.class);
@@ -110,10 +111,22 @@ public final class UnboxNode extends AbstractBoxingNode implements Virtualizable
             if (unboxed != null && unboxed.getJavaKind() == boxingKind) {
                 return ConstantNode.forConstant(unboxed, metaAccess);
             }
-        } else if (forValue instanceof BoxNode) {
-            BoxNode box = (BoxNode) forValue;
-            if (boxingKind == box.getBoxingKind()) {
-                return box.getValue();
+        } else {
+            ValueNode inputUnPi = GraphUtil.skipPi(forValue);
+            if (inputUnPi instanceof BoxNode) {
+                BoxNode box = (BoxNode) inputUnPi;
+                if (boxingKind == box.getBoxingKind()) {
+                    return box.getValue();
+                }
+            }
+            // unproxify constant box (only do it for constants as they are leaf nodes and thus
+            // outside a loop)
+            ValueNode inputUnProxyify = GraphUtil.unproxify(forValue);
+            if (inputUnProxyify instanceof BoxNode && ((BoxNode) inputUnProxyify).getValue().isConstant()) {
+                BoxNode box = (BoxNode) inputUnProxyify;
+                if (boxingKind == box.getBoxingKind()) {
+                    return box.getValue();
+                }
             }
         }
         return null;

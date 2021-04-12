@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,30 +49,27 @@ public interface TruffleMetaAccessProvider {
     void addTargetToDequeue(CompilableTruffleAST target);
 
     /**
-     * Dequeue from the compilation queue the targets
-     * {@link #addTargetToDequeue(CompilableTruffleAST) added}.
-     */
-    void dequeueTargets();
-
-    /**
-     * Sets how many calls in total are in the related compilation unit. Includes both calls that
-     * were inlined and calls that were not (ie. remained calls after inlining).
+     * To be used from the compiler side. Sets how many calls in total are in the related
+     * compilation unit. Includes both calls that were inlined and calls that were not (ie. remained
+     * calls after inlining).
      */
     void setCallCount(int count);
 
     /**
-     * @return How many calls in total are in the related compilation unit. Includes both calls that
-     *         were inlined and calls that were not (ie. remained calls after inlining).
-     */
-    int countCalls();
-
-    /**
-     * Sets how many calls in total were inlined into the compilation unit.
+     * To be used from the compiler side. Sets how many calls in total were inlined into the
+     * compilation unit.
      */
     void setInlinedCallCount(int count);
 
     /**
-     * @return How many calls in total were inlined into the compilation unit.
+     * @return How many calls were inlined.
      */
     int countInlinedCalls();
+
+    /**
+     * To be used from the compiler side.
+     *
+     * @param target register this target as inlined.
+     */
+    void addInlinedTarget(CompilableTruffleAST target);
 }

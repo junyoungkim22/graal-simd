@@ -253,7 +253,7 @@ public final class InspectorDebugger extends DebuggerDomain {
         }
         JSONObject json = new JSONObject();
         JSONArray arr = new JSONArray();
-        Source source = script.getSource();
+        Source source = script.getSourceLoaded();
         if (source.hasCharacters() && source.getLength() > 0) {
             int lc = source.getLineCount();
             int l1 = start.getLine();
@@ -1145,7 +1145,7 @@ public final class InspectorDebugger extends DebuggerDomain {
                     silentResume = false;
                 }
             } finally {
-                onSuspendPhaser.arrive();
+                onSuspendPhaser.arriveAndDeregister();
                 if (delayUnlock.getAndSet(false)) {
                     future.set(scheduler.schedule(() -> {
                         unlock();

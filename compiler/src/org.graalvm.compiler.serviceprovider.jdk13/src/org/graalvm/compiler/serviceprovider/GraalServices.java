@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,8 @@ import static java.lang.Thread.currentThread;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.ArrayList;
@@ -45,7 +47,10 @@ import jdk.vm.ci.meta.JavaType;
 import org.graalvm.compiler.serviceprovider.SpeculationReasonGroup.SpeculationContextObject;
 
 import jdk.vm.ci.code.BytecodePosition;
+import jdk.vm.ci.code.DebugInfo;
 import jdk.vm.ci.code.VirtualObject;
+import jdk.vm.ci.code.site.Infopoint;
+import jdk.vm.ci.code.site.InfopointReason;
 import jdk.vm.ci.meta.ResolvedJavaField;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import jdk.vm.ci.meta.ResolvedJavaType;
@@ -59,7 +64,7 @@ import static jdk.vm.ci.services.Services.IS_IN_NATIVE_IMAGE;
 import static jdk.vm.ci.services.Services.IS_BUILDING_NATIVE_IMAGE;
 
 /**
- * JDK 13+ version of {@link GraalServices}.
+ * JDK 13..15 version of {@link GraalServices}.
  */
 public final class GraalServices {
 
@@ -589,5 +594,48 @@ public final class GraalServices {
 
     public static boolean hasLookupReferencedType() {
         return constantPoolLookupReferencedType != null;
+    }
+
+    private static final Constructor<?> implicitExceptionDispatchConstructor;
+
+    static {
+        Constructor<?> tempConstructor;
+        try {
+            Class<?> implicitExceptionDispatch = Class.forName("jdk.vm.ci.code.site.ImplicitExceptionDispatch");
+            tempConstructor = implicitExceptionDispatch.getConstructor(int.class, int.class, DebugInfo.class);
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
+            tempConstructor = null;
+        }
+        implicitExceptionDispatchConstructor = tempConstructor;
+    }
+
+    /**
+     * Returns true if JVMCI supports arbitrary implicit exception dispatch.
+     */
+    public static boolean supportsArbitraryImplicitException() {
+        return implicitExceptionDispatchConstructor != null;
+    }
+
+    /**
+     * Construct an implicit exception dispatch. If this JVMCI does not support arbitrary implicit
+     * exception dispatch, then throws an exception when {@code pcOffset} is not the same as
+     * {@code dispatchOffset}.
+     *
+     * @param pcOffset the exceptional PC offset
+     * @param dispatchOffset the continuation PC offset
+     * @param debugInfo debugging information at the exceptional PC
+     */
+    public static Infopoint genImplicitException(int pcOffset, int dispatchOffset, DebugInfo debugInfo) {
+        if (implicitExceptionDispatchConstructor == null) {
+            if (pcOffset != dispatchOffset) {
+                throw new InternalError("This JVMCI version doesn't support dispatching implicit exception to an arbitrary address.");
+            }
+            return new Infopoint(pcOffset, debugInfo, InfopointReason.IMPLICIT_EXCEPTION);
+        }
+        try {
+            return (Infopoint) implicitExceptionDispatchConstructor.newInstance(pcOffset, dispatchOffset, debugInfo);
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+            throw new InternalError("Exception when instantiating implicit exception dispatch", e);
+        }
     }
 }

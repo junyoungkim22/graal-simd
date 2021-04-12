@@ -26,7 +26,6 @@ package com.oracle.svm.jni.functions;
 
 // Checkstyle: allow reflection
 
-import java.io.CharConversionException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -37,6 +36,7 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import org.graalvm.compiler.nodes.java.ArrayLengthNode;
 import org.graalvm.compiler.serviceprovider.GraalUnsafeAccess;
 import org.graalvm.nativeimage.ImageSingletons;
 import org.graalvm.nativeimage.IsolateThread;
@@ -67,6 +67,7 @@ import com.oracle.svm.core.c.function.CEntryPointErrors;
 import com.oracle.svm.core.c.function.CEntryPointOptions;
 import com.oracle.svm.core.c.function.CEntryPointOptions.Publish;
 import com.oracle.svm.core.hub.DynamicHub;
+import com.oracle.svm.core.jdk.Target_java_nio_DirectByteBuffer;
 import com.oracle.svm.core.log.Log;
 import com.oracle.svm.core.monitor.MonitorSupport;
 import com.oracle.svm.core.snippets.KnownIntrinsics;
@@ -77,7 +78,6 @@ import com.oracle.svm.jni.JNIObjectHandles;
 import com.oracle.svm.jni.JNIThreadLocalPendingException;
 import com.oracle.svm.jni.JNIThreadLocalPinnedObjects;
 import com.oracle.svm.jni.JNIThreadOwnedMonitors;
-import com.oracle.svm.jni.access.JNIAccessFeature;
 import com.oracle.svm.jni.access.JNIAccessibleMethod;
 import com.oracle.svm.jni.access.JNIAccessibleMethodDescriptor;
 import com.oracle.svm.jni.access.JNINativeLinkage;
@@ -94,6 +94,9 @@ import com.oracle.svm.jni.functions.JNIFunctions.Support.JNIExceptionHandlerRetu
 import com.oracle.svm.jni.functions.JNIFunctions.Support.JNIExceptionHandlerReturnNullWord;
 import com.oracle.svm.jni.functions.JNIFunctions.Support.JNIExceptionHandlerReturnZero;
 import com.oracle.svm.jni.functions.JNIFunctions.Support.JNIExceptionHandlerVoid;
+import com.oracle.svm.jni.hosted.JNIFieldAccessorMethod;
+import com.oracle.svm.jni.hosted.JNIJavaCallWrapperMethod;
+import com.oracle.svm.jni.hosted.JNIPrimitiveArrayOperationMethod;
 import com.oracle.svm.jni.nativeapi.JNIEnvironment;
 import com.oracle.svm.jni.nativeapi.JNIErrors;
 import com.oracle.svm.jni.nativeapi.JNIFieldId;
@@ -109,14 +112,30 @@ import jdk.vm.ci.meta.MetaUtil;
 import sun.misc.Unsafe;
 
 /**
- * Implementations of the functions defined by the Java Native Interface. Not all functions are
- * currently implemented.
+ * Implementations of the functions defined by the Java Native Interface.
+ *
+ * Not all functions are currently implemented. Some functions are generated, and therefore not
+ * defined in this class:
+ *
+ * <ul>
+ * <li>Field getters and setters ({@code Get<Type>Field}, {@code Set<Type>Field},
+ * {@code GetStatic<Type>Field}, and {@code SetStatic<Type>Field}) are generated in
+ * {@link JNIFieldAccessorMethod}.</li>
+ *
+ * <li>Operations on primitive arrays {@code New<PrimitiveType>Array},
+ * {@code Get<PrimitiveType>ArrayElements}, {@code Release<PrimitiveType>ArrayElements},
+ * {@code Get<PrimitiveType>ArrayRegion} and {@code Set<PrimitiveType>ArrayRegion}) are generated in
+ * {@link JNIPrimitiveArrayOperationMethod}</li>
+ *
+ * <li>Wrappers for the methods callable by JNI are generated in
+ * {@link JNIJavaCallWrapperMethod}.</li>
+ * </ul>
  *
  * @see <a href="http://docs.oracle.com/javase/8/docs/technotes/guides/jni/spec/functions.html">Java
  *      Native Interface Specification: JNI Functions</a>
  */
 @SuppressWarnings("unused")
-final class JNIFunctions {
+public final class JNIFunctions {
 
     // Checkstyle: stop
 
@@ -317,7 +336,7 @@ final class JNIFunctions {
     @CEntryPoint(exceptionHandler = JNIExceptionHandlerReturnNullHandle.class)
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullHandleOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIObjectHandle FindClass(JNIEnvironment env, CCharPointer cname) {
-        String name = CTypeConversion.toJavaString(cname);
+        String name = Utf8.utf8ToString(cname);
         if (!name.startsWith("[")) {
             name = "L" + name + ";";
         }
@@ -342,8 +361,8 @@ final class JNIFunctions {
         Pointer p = (Pointer) methods;
         for (int i = 0; i < nmethods; i++) {
             JNINativeMethod entry = (JNINativeMethod) p;
-            String name = CTypeConversion.toJavaString(entry.name());
-            String signature = CTypeConversion.toJavaString(entry.signature());
+            String name = Utf8.utf8ToString(entry.name());
+            String signature = Utf8.utf8ToString(entry.signature());
             CFunctionPointer fnPtr = entry.fnPtr();
 
             String declaringClass = MetaUtil.toInternalName(clazz.getName());
@@ -456,15 +475,7 @@ final class JNIFunctions {
     @CEntryPoint(exceptionHandler = JNIExceptionHandlerReturnNullHandle.class)
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullHandleOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIObjectHandle NewStringUTF(JNIEnvironment env, CCharPointer bytes) {
-        String str = null;
-        if (bytes.isNonNull()) {
-            ByteBuffer buffer = CTypeConversion.asByteBuffer(bytes, Integer.MAX_VALUE);
-            try {
-                str = Utf8.utf8ToString(true, buffer);
-            } catch (CharConversionException ignore) {
-            }
-        }
-        return JNIObjectHandles.createLocal(str);
+        return JNIObjectHandles.createLocal(Utf8.utf8ToString(bytes));
     }
 
     /*
@@ -601,14 +612,6 @@ final class JNIFunctions {
      * jobject NewDirectByteBuffer(JNIEnv* env, void* address, jlong capacity);
      */
 
-    @TargetClass(className = "java.nio.DirectByteBuffer")
-    static final class Target_java_nio_DirectByteBuffer {
-        @Alias
-        Target_java_nio_DirectByteBuffer(long addr, int cap) {
-        }
-
-    }
-
     @CEntryPoint(exceptionHandler = JNIExceptionHandlerReturnNullHandle.class)
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullHandleOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIObjectHandle NewDirectByteBuffer(JNIEnvironment env, WordPointer address, long capacity) {
@@ -721,7 +724,13 @@ final class JNIFunctions {
     @CEntryPoint(exceptionHandler = JNIExceptionHandlerReturnMinusOne.class)
     @CEntryPointOptions(prologue = JNIEnvEnterReturnMinusOneOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static int GetArrayLength(JNIEnvironment env, JNIObjectHandle harray) {
-        return KnownIntrinsics.readArrayLength(JNIObjectHandles.getObject(harray));
+        /*
+         * JNI does not specify the behavior for illegal arguments (e.g. null or non-array objects);
+         * it is the JNI caller's responsibility to ensure that arguments are correct. We therefore
+         * use an unchecked access to the length field. Note that the lack of check is also
+         * necessary to support hybrid object layouts.
+         */
+        return ArrayLengthNode.arrayLength(JNIObjectHandles.getObject(harray));
     }
 
     /*
@@ -841,12 +850,10 @@ final class JNIFunctions {
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullWordOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIFieldId FromReflectedField(JNIEnvironment env, JNIObjectHandle fieldHandle) {
         JNIFieldId fieldId = WordFactory.zero();
-        if (JNIAccessFeature.singleton().haveJavaRuntimeReflectionSupport()) {
-            Field obj = JNIObjectHandles.getObject(fieldHandle);
-            if (obj != null) {
-                boolean isStatic = Modifier.isStatic(obj.getModifiers());
-                fieldId = JNIReflectionDictionary.singleton().getDeclaredFieldID(obj.getDeclaringClass(), obj.getName(), isStatic);
-            }
+        Field obj = JNIObjectHandles.getObject(fieldHandle);
+        if (obj != null) {
+            boolean isStatic = Modifier.isStatic(obj.getModifiers());
+            fieldId = JNIReflectionDictionary.singleton().getDeclaredFieldID(obj.getDeclaringClass(), obj.getName(), isStatic);
         }
         return fieldId;
     }
@@ -858,16 +865,14 @@ final class JNIFunctions {
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullHandleOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIObjectHandle ToReflectedField(JNIEnvironment env, JNIObjectHandle classHandle, JNIFieldId fieldId) {
         Field field = null;
-        if (JNIAccessFeature.singleton().haveJavaRuntimeReflectionSupport()) {
-            Class<?> clazz = JNIObjectHandles.getObject(classHandle);
-            if (clazz != null) {
-                String name = JNIReflectionDictionary.singleton().getFieldNameByID(clazz, fieldId);
-                if (name != null) {
-                    try {
-                        field = clazz.getDeclaredField(name);
-                    } catch (NoSuchFieldException ignored) {
-                        // proceed and return null
-                    }
+        Class<?> clazz = JNIObjectHandles.getObject(classHandle);
+        if (clazz != null) {
+            String name = JNIReflectionDictionary.singleton().getFieldNameByID(clazz, fieldId);
+            if (name != null) {
+                try {
+                    field = clazz.getDeclaredField(name);
+                } catch (NoSuchFieldException ignored) {
+                    // proceed and return null
                 }
             }
         }
@@ -881,13 +886,11 @@ final class JNIFunctions {
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullWordOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIMethodId FromReflectedMethod(JNIEnvironment env, JNIObjectHandle methodHandle) {
         JNIMethodId methodId = WordFactory.nullPointer();
-        if (JNIAccessFeature.singleton().haveJavaRuntimeReflectionSupport()) {
-            Executable method = JNIObjectHandles.getObject(methodHandle);
-            if (method != null) {
-                boolean isStatic = Modifier.isStatic(method.getModifiers());
-                JNIAccessibleMethodDescriptor descriptor = JNIAccessibleMethodDescriptor.of(method);
-                methodId = JNIReflectionDictionary.singleton().getDeclaredMethodID(method.getDeclaringClass(), descriptor, isStatic);
-            }
+        Executable method = JNIObjectHandles.getObject(methodHandle);
+        if (method != null) {
+            boolean isStatic = Modifier.isStatic(method.getModifiers());
+            JNIAccessibleMethodDescriptor descriptor = JNIAccessibleMethodDescriptor.of(method);
+            methodId = JNIReflectionDictionary.singleton().getDeclaredMethodID(method.getDeclaringClass(), descriptor, isStatic);
         }
         return methodId;
     }
@@ -899,25 +902,23 @@ final class JNIFunctions {
     @CEntryPointOptions(prologue = JNIEnvEnterReturnNullHandleOnFailurePrologue.class, publishAs = Publish.NotPublished, include = CEntryPointOptions.NotIncludedAutomatically.class)
     static JNIObjectHandle ToReflectedMethod(JNIEnvironment env, JNIObjectHandle classHandle, JNIMethodId methodId, boolean isStatic) {
         Executable result = null;
-        if (JNIAccessFeature.singleton().haveJavaRuntimeReflectionSupport()) {
-            JNIAccessibleMethod jniMethod = JNIReflectionDictionary.getMethodByID(methodId);
-            JNIAccessibleMethodDescriptor descriptor = JNIReflectionDictionary.getMethodDescriptor(jniMethod);
-            if (descriptor != null) {
-                Class<?> clazz = jniMethod.getDeclaringClass().getClassObject();
-                if (descriptor.isConstructor()) {
-                    for (Constructor<?> ctor : clazz.getDeclaredConstructors()) {
-                        if (descriptor.equals(JNIAccessibleMethodDescriptor.of(ctor))) {
-                            result = ctor;
-                            break;
-                        }
+        JNIAccessibleMethod jniMethod = JNIReflectionDictionary.getMethodByID(methodId);
+        JNIAccessibleMethodDescriptor descriptor = JNIReflectionDictionary.getMethodDescriptor(jniMethod);
+        if (descriptor != null) {
+            Class<?> clazz = jniMethod.getDeclaringClass().getClassObject();
+            if (descriptor.isConstructor()) {
+                for (Constructor<?> ctor : clazz.getDeclaredConstructors()) {
+                    if (descriptor.equals(JNIAccessibleMethodDescriptor.of(ctor))) {
+                        result = ctor;
+                        break;
                     }
-                } else {
-                    for (Method method : clazz.getDeclaredMethods()) {
-                        if (descriptor.getName().equals(method.getName())) {
-                            if (descriptor.equals(JNIAccessibleMethodDescriptor.of(method))) {
-                                result = method;
-                                break;
-                            }
+                }
+            } else {
+                for (Method method : clazz.getDeclaredMethods()) {
+                    if (descriptor.getName().equals(method.getName())) {
+                        if (descriptor.equals(JNIAccessibleMethodDescriptor.of(method))) {
+                            result = method;
+                            break;
                         }
                     }
                 }
@@ -966,7 +967,7 @@ final class JNIFunctions {
      * Helper code for JNI functions. This is an inner class because the outer methods must match
      * JNI functions.
      */
-    static class Support {
+    public static class Support {
         static class JNIEnvEnterReturnEDetachedOnFailurePrologue {
             public static void enter(JNIEnvironment env) {
                 int error = CEntryPointActions.enter((IsolateThread) env);
@@ -1006,7 +1007,7 @@ final class JNIFunctions {
         static final CGlobalData<CCharPointer> JNIENV_ENTER_FAIL_FATALLY_MESSAGE = CGlobalDataFactory.createCString(
                         "A JNI call failed to enter the isolate via its JNI environment argument. The environment might be invalid or no longer exists.");
 
-        static class JNIEnvEnterFatalOnFailurePrologue {
+        public static class JNIEnvEnterFatalOnFailurePrologue {
             public static void enter(JNIEnvironment env) {
                 int error = CEntryPointActions.enter((IsolateThread) env);
                 if (error != 0) {
@@ -1031,7 +1032,7 @@ final class JNIFunctions {
             }
         }
 
-        static class JNIExceptionHandlerVoid {
+        public static class JNIExceptionHandlerVoid {
             static void handle(Throwable t) {
                 Support.handleException(t);
             }
@@ -1083,8 +1084,8 @@ final class JNIFunctions {
             Class<?> clazz = JNIObjectHandles.getObject(hclazz);
             DynamicHub.fromClass(clazz).ensureInitialized();
 
-            String name = CTypeConversion.toJavaString(cname);
-            String signature = CTypeConversion.toJavaString(csig);
+            String name = Utf8.utf8ToString(cname);
+            String signature = Utf8.utf8ToString(csig);
             return getMethodID(clazz, name, signature, isStatic);
         }
 
@@ -1109,7 +1110,7 @@ final class JNIFunctions {
             Class<?> clazz = JNIObjectHandles.getObject(hclazz);
             DynamicHub.fromClass(clazz).ensureInitialized();
 
-            String name = CTypeConversion.toJavaString(cname);
+            String name = Utf8.utf8ToString(cname);
             JNIFieldId fieldID = JNIReflectionDictionary.singleton().getFieldID(clazz, name, isStatic);
             if (fieldID.isNull()) {
                 throw new NoSuchFieldError(clazz.getName() + '.' + name);

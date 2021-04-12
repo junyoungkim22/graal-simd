@@ -81,6 +81,11 @@ final class HeapChunkProvider {
     HeapChunkProvider() {
     }
 
+    @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
+    public UnsignedWord getBytesInUnusedChunks() {
+        return bytesInUnusedAlignedChunks.get();
+    }
+
     @AlwaysInline("Remove all logging when noopLog is returned by this method")
     private static Log log() {
         return Log.noopLog();
@@ -107,8 +112,7 @@ final class HeapChunkProvider {
             }
             log().string("  new chunk: ").hex(result).newline();
 
-            initializeChunk(result, chunkSize);
-            resetAlignedHeapChunk(result);
+            AlignedHeapChunk.initialize(result, chunkSize);
         }
         assert HeapChunk.getTopOffset(result).equal(AlignedHeapChunk.getObjectsStartOffset());
         assert HeapChunk.getEndOffset(result).equal(chunkSize);
@@ -117,46 +121,38 @@ final class HeapChunkProvider {
             zap(result, HeapPolicy.getProducedHeapChunkZapWord());
         }
 
-        HeapPolicy.youngUsedBytes.addAndGet(chunkSize);
+        HeapPolicy.increaseEdenUsedBytes(chunkSize);
 
         log().string("  result chunk: ").hex(result).string("  ]").newline();
         return result;
     }
 
-    /** Release an AlignedHeapChunk, either to the free list or back to the operating system. */
-    void consumeAlignedChunk(AlignedHeader chunk) {
-        log().string("[HeapChunkProvider.consumeAlignedChunk  chunk: ").hex(chunk).newline();
+    /**
+     * Releases a list of AlignedHeapChunks, either to the free list or back to the operating
+     * system. This method may only be called after the chunks were already removed from the spaces.
+     */
+    void consumeAlignedChunks(AlignedHeader firstChunk) {
+        assert HeapChunk.getPrevious(firstChunk).isNull() : "prev must be null";
+        AlignedHeader cur = firstChunk;
 
-        if (keepAlignedChunk()) {
-            cleanAlignedChunk(chunk);
-            pushUnusedAlignedChunk(chunk);
-        } else {
-            log().string("  release memory to the OS").newline();
-            freeAlignedChunk(chunk);
-        }
-        log().string("  ]").newline();
-    }
-
-    private boolean keepAlignedChunk() {
-        Log trace = Log.noopLog().string("[HeapChunkProvider.keepAlignedChunk:");
         UnsignedWord minimumHeapSize = HeapPolicy.getMinimumHeapSize();
-        UnsignedWord heapChunkBytes = HeapImpl.getHeapImpl().getUsedChunkBytes();
-        UnsignedWord unusedChunkBytes = bytesInUnusedAlignedChunks.get();
-        UnsignedWord bytesInUse = heapChunkBytes.add(unusedChunkBytes);
+        UnsignedWord committedBytesAfterGC = GCImpl.getChunkBytes().add(getBytesInUnusedChunks());
+        if (minimumHeapSize.aboveThan(committedBytesAfterGC)) {
+            UnsignedWord chunksToKeep = minimumHeapSize.subtract(committedBytesAfterGC).unsignedDivide(HeapPolicy.getAlignedHeapChunkSize());
+            while (cur.isNonNull() && chunksToKeep.aboveThan(0)) {
+                AlignedHeader next = HeapChunk.getNext(cur);
+                cleanAlignedChunk(cur);
+                pushUnusedAlignedChunk(cur);
+                chunksToKeep = chunksToKeep.subtract(1);
+                cur = next;
+            }
+        }
 
-        boolean result = bytesInUse.belowThan(minimumHeapSize);
-        trace
-                        .string("  minimumHeapSize: ").unsigned(minimumHeapSize)
-                        .string("  heapChunkBytes: ").unsigned(heapChunkBytes)
-                        .string("  unusedBytes: ").unsigned(unusedChunkBytes)
-                        .string("  bytesInUse: ").unsigned(bytesInUse)
-                        .string("  returns: ").bool(result)
-                        .string(" ]").newline();
-        return result;
+        freeAlignedChunkList(cur);
     }
 
     private static void cleanAlignedChunk(AlignedHeader alignedChunk) {
-        resetAlignedHeapChunk(alignedChunk);
+        AlignedHeapChunk.reset(alignedChunk);
         if (HeapPolicy.getZapConsumedHeapChunks()) {
             zap(alignedChunk, HeapPolicy.getConsumedHeapChunkZapWord());
         }
@@ -236,57 +232,25 @@ final class HeapChunkProvider {
             throw UNALIGNED_OUT_OF_MEMORY_ERROR;
         }
 
-        initializeChunk(result, chunkSize);
-        resetUnalignedChunk(result);
+        UnalignedHeapChunk.initialize(result, chunkSize);
         assert objectSize.belowOrEqual(HeapChunk.availableObjectMemory(result)) : "UnalignedHeapChunk insufficient for requested object";
 
         if (HeapPolicy.getZapProducedHeapChunks()) {
             zap(result, HeapPolicy.getProducedHeapChunkZapWord());
         }
 
-        HeapPolicy.youngUsedBytes.addAndGet(chunkSize);
+        HeapPolicy.increaseEdenUsedBytes(chunkSize);
 
         log().string("  returns ").hex(result).string("  ]").newline();
         return result;
     }
 
     /**
-     * Release an UnalignedHeapChunk back to the operating system. They are never recycled to a free
-     * list.
+     * Releases a list of UnalignedHeapChunks back to the operating system. They are never recycled
+     * to a free list.
      */
-    static void consumeUnalignedChunk(UnalignedHeader chunk) {
-        UnsignedWord chunkSize = unalignedChunkSize(chunk);
-        log().string("[HeapChunkProvider.consumeUnalignedChunk  chunk: ").hex(chunk).string("  chunkSize: ").hex(chunkSize).newline();
-
-        freeUnalignedChunk(chunk);
-
-        log().string(" ]").newline();
-    }
-
-    /** Initialize the immutable state of a chunk. */
-    private static void initializeChunk(Header<?> that, UnsignedWord chunkSize) {
-        HeapChunk.setEndOffset(that, chunkSize);
-    }
-
-    /** Reset the mutable state of a chunk. */
-    private static void resetChunkHeader(Header<?> chunk, Pointer objectsStart) {
-        HeapChunk.setTopPointer(chunk, objectsStart);
-        HeapChunk.setSpace(chunk, null);
-        HeapChunk.setNext(chunk, WordFactory.nullPointer());
-        HeapChunk.setPrevious(chunk, WordFactory.nullPointer());
-    }
-
-    private static void resetAlignedHeapChunk(AlignedHeader chunk) {
-        resetChunkHeader(chunk, AlignedHeapChunk.getObjectsStart(chunk));
-
-        CardTable.cleanTableToPointer(AlignedHeapChunk.getCardTableStart(chunk), AlignedHeapChunk.getCardTableLimit(chunk));
-        FirstObjectTable.initializeTableToLimit(AlignedHeapChunk.getFirstObjectTableStart(chunk), AlignedHeapChunk.getFirstObjectTableLimit(chunk));
-    }
-
-    private static void resetUnalignedChunk(UnalignedHeader result) {
-        resetChunkHeader(result, UnalignedHeapChunk.getObjectStart(result));
-
-        CardTable.cleanTableToPointer(UnalignedHeapChunk.getCardTableStart(result), UnalignedHeapChunk.getCardTableLimit(result));
+    static void consumeUnalignedChunks(UnalignedHeader firstChunk) {
+        freeUnalignedChunkList(firstChunk);
     }
 
     private static void zap(Header<?> chunk, WordBase value) {
@@ -333,16 +297,6 @@ final class HeapChunkProvider {
 
     long getFirstAllocationTime() {
         return firstAllocationTime;
-    }
-
-    boolean slowlyFindPointer(Pointer p) {
-        for (AlignedHeader chunk = unusedAlignedChunks.get(); chunk.isNonNull(); chunk = HeapChunk.getNext(chunk)) {
-            Pointer chunkPtr = HeapChunk.asPointer(chunk);
-            if (p.aboveOrEqual(chunkPtr) && p.belowThan(chunkPtr.add(HeapPolicy.getAlignedHeapChunkSize()))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)

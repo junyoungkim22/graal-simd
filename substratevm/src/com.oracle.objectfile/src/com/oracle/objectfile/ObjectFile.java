@@ -24,8 +24,8 @@
  */
 package com.oracle.objectfile;
 
-import java.io.Closeable;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -52,8 +52,6 @@ import com.oracle.objectfile.debuginfo.DebugInfoProvider;
 import com.oracle.objectfile.elf.ELFObjectFile;
 import com.oracle.objectfile.macho.MachOObjectFile;
 import com.oracle.objectfile.pecoff.PECoffObjectFile;
-
-import sun.nio.ch.DirectBuffer;
 
 /**
  * Abstract superclass for object files. An object file is a binary container for sections,
@@ -253,6 +251,16 @@ public abstract class ObjectFile {
         DIRECT_4,
         DIRECT_8,
         /**
+         * The index of the object file section containing the relocation's symbol supplies the
+         * fixup bytes. (used in CodeView debug information)
+         */
+        SECTION_2,
+        /**
+         * The address of the object file section containing the relocation's symbol (plus addend)
+         * supplies the fixup bytes. (used in CodeView debug information)
+         */
+        SECREL_4,
+        /**
          * The relocation's symbol provides an address whose PC-relative value (plus addend)
          * supplies the fixup bytes.
          */
@@ -271,11 +279,11 @@ public abstract class ObjectFile {
         AARCH64_R_AARCH64_ADD_ABS_LO12_NC,
         AARCH64_R_LD_PREL_LO19,
         AARCH64_R_GOT_LD_PREL19,
+        AARCH64_R_AARCH64_LDST128_ABS_LO12_NC,
         AARCH64_R_AARCH64_LDST64_ABS_LO12_NC,
         AARCH64_R_AARCH64_LDST32_ABS_LO12_NC,
         AARCH64_R_AARCH64_LDST16_ABS_LO12_NC,
-        AARCH64_R_AARCH64_LDST8_ABS_LO12_NC,
-        AARCH64_R_AARCH64_LDST128_ABS_LO12_NC;
+        AARCH64_R_AARCH64_LDST8_ABS_LO12_NC;
 
         public static RelocationKind getDirect(int relocationSize) {
             switch (relocationSize) {
@@ -325,9 +333,11 @@ public abstract class ObjectFile {
                     return 1;
                 case DIRECT_2:
                 case PC_RELATIVE_2:
+                case SECTION_2:
                     return 2;
                 case DIRECT_4:
                 case PC_RELATIVE_4:
+                case SECREL_4:
                     return 4;
                 case DIRECT_8:
                 case PC_RELATIVE_8:
@@ -1256,12 +1266,36 @@ public abstract class ObjectFile {
         int totalSize = bake(sortedObjectFileElements);
         try {
             ByteBuffer buffer = outputChannel.map(MapMode.READ_WRITE, 0, totalSize);
-            try (Closeable ignored = () -> ((DirectBuffer) buffer).cleaner().clean()) {
+            try {
                 writeBuffer(sortedObjectFileElements, buffer);
+            } finally {
+                cleanBuffer(buffer); // unmap immediately
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static void cleanBuffer(ByteBuffer buffer) throws IOException {
+        // The Cleaner class returned by DirectBuffer.cleaner() was moved from to jdk.internal from
+        // sun.misc, so we need to call it reflectively to ensure binary compatibility between JDKs
+        Object cleaner;
+        try {
+            Class<? extends ByteBuffer> bufferClass = buffer.getClass();
+            ModuleAccess.openModuleByClass(bufferClass, ObjectFile.class);
+            cleaner = getMethodAndSetAccessible(bufferClass, "cleaner").invoke(buffer);
+            Class<?> cleanerClass = cleaner.getClass();
+            ModuleAccess.openModuleByClass(cleanerClass, ObjectFile.class);
+            getMethodAndSetAccessible(cleanerClass, "clean").invoke(cleaner);
+        } catch (ReflectiveOperationException e) {
+            throw new IOException("Could not clean mapped ByteBuffer", e);
+        }
+    }
+
+    private static Method getMethodAndSetAccessible(Class<?> clazz, String name, Class<?>... parameterTypes) throws NoSuchMethodException {
+        Method method = clazz.getMethod(name, parameterTypes);
+        method.setAccessible(true);
+        return method;
     }
 
     /*

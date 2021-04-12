@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,12 @@
 package org.graalvm.compiler.nodes.graphbuilderconf;
 
 import static jdk.vm.ci.meta.DeoptimizationAction.InvalidateReprofile;
-import static jdk.vm.ci.meta.DeoptimizationReason.NullCheckException;
 import static org.graalvm.compiler.core.common.type.StampFactory.objectNonNull;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.graalvm.collections.Pair;
 import org.graalvm.compiler.bytecode.Bytecode;
 import org.graalvm.compiler.bytecode.BytecodeProvider;
 import org.graalvm.compiler.core.common.type.AbstractPointerStamp;
@@ -42,12 +45,14 @@ import org.graalvm.compiler.nodes.CallTargetNode;
 import org.graalvm.compiler.nodes.CallTargetNode.InvokeKind;
 import org.graalvm.compiler.nodes.DynamicPiNode;
 import org.graalvm.compiler.nodes.FixedGuardNode;
+import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.LogicNode;
 import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.PluginReplacementNode;
+import org.graalvm.compiler.nodes.ProfileData.BranchProbabilityData;
 import org.graalvm.compiler.nodes.StateSplit;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
@@ -55,6 +60,7 @@ import org.graalvm.compiler.nodes.calc.IsNullNode;
 import org.graalvm.compiler.nodes.calc.NarrowNode;
 import org.graalvm.compiler.nodes.calc.SignExtendNode;
 import org.graalvm.compiler.nodes.calc.ZeroExtendNode;
+import org.graalvm.compiler.nodes.extended.BranchProbabilityNode;
 import org.graalvm.compiler.nodes.extended.BytecodeExceptionNode.BytecodeExceptionKind;
 import org.graalvm.compiler.nodes.extended.GuardingNode;
 import org.graalvm.compiler.nodes.java.InstanceOfDynamicNode;
@@ -100,8 +106,8 @@ public interface GraphBuilderContext extends GraphBuilderTool {
      * immediately. If the node is a {@link StateSplit} with a null
      * {@linkplain StateSplit#stateAfter() frame state} , the frame state is initialized.
      *
-     * @param value the value to add to the graph and push to the stack. The
-     *            {@code value.getJavaKind()} kind is used when type checking this operation.
+     * @param value the value to add to the graph. The {@code value.getJavaKind()} kind is used when
+     *            type checking this operation.
      * @return a node equivalent to {@code value} in the graph
      */
     default <T extends ValueNode> T add(T value) {
@@ -222,6 +228,10 @@ public interface GraphBuilderContext extends GraphBuilderTool {
      */
     int bci();
 
+    default boolean bciCanBeDuplicated() {
+        return false;
+    }
+
     /**
      * Gets the kind of invocation currently being parsed.
      */
@@ -249,6 +259,19 @@ public interface GraphBuilderContext extends GraphBuilderTool {
             parent = parent.getParent();
         }
         return result;
+    }
+
+    default List<Pair<ResolvedJavaMethod, Integer>> getCallingContext() {
+        List<Pair<ResolvedJavaMethod, Integer>> callingContext = new ArrayList<>();
+        /*
+         * We always add a method which bytecode is parsed, so size of this list is minimum one.
+         */
+        GraphBuilderContext cur = this;
+        while (cur != null) {
+            callingContext.add(Pair.create(cur.getMethod(), cur.bci()));
+            cur = cur.getParent();
+        }
+        return callingContext;
     }
 
     /**
@@ -288,23 +311,35 @@ public interface GraphBuilderContext extends GraphBuilderTool {
             LogicNode condition = getGraph().unique(IsNullNode.create(value));
             GuardingNode guardingNode;
             if (needsExplicitException()) {
-                AbstractBeginNode exceptionPath = genExplicitExceptionEdge(BytecodeExceptionKind.NULL_POINTER);
-                IfNode ifNode = append(new IfNode(condition, exceptionPath, null, 0.01));
-                BeginNode nonNullPath = append(new BeginNode());
-                ifNode.setFalseSuccessor(nonNullPath);
-                guardingNode = nonNullPath;
+                guardingNode = emitBytecodeExceptionCheck(condition, false, BytecodeExceptionKind.NULL_POINTER);
             } else {
-                guardingNode = append(new FixedGuardNode(condition, NullCheckException, action, true));
+                guardingNode = append(new FixedGuardNode(condition, DeoptimizationReason.NullCheckException, action, true));
             }
-            ValueNode nonNullReceiver = getGraph().addOrUniqueWithInputs(PiNode.create(value, objectNonNull(), guardingNode.asNode()));
-            // TODO: Propogating the non-null into the frame state would
-            // remove subsequent null-checks on the same value. However,
-            // it currently causes an assertion failure when merging states.
-            //
-            // frameState.replace(value, nonNullReceiver);
-            return nonNullReceiver;
+            return getGraph().addOrUniqueWithInputs(PiNode.create(value, objectNonNull(), guardingNode.asNode()));
         }
         return value;
+    }
+
+    default AbstractBeginNode emitBytecodeExceptionCheck(LogicNode condition, boolean passingOnTrue, BytecodeExceptionKind exceptionKind, ValueNode... arguments) {
+        if (passingOnTrue ? condition.isTautology() : condition.isContradiction()) {
+            return null;
+        }
+
+        AbstractBeginNode exceptionPath = genExplicitExceptionEdge(exceptionKind, arguments);
+
+        AbstractBeginNode trueSuccessor = passingOnTrue ? null : exceptionPath;
+        AbstractBeginNode falseSuccessor = passingOnTrue ? exceptionPath : null;
+        boolean negate = !passingOnTrue;
+        BranchProbabilityData probability = BranchProbabilityData.injected(BranchProbabilityNode.EXTREMELY_FAST_PATH_PROBABILITY, negate);
+        IfNode ifNode = append(new IfNode(condition, trueSuccessor, falseSuccessor, probability));
+
+        BeginNode passingSuccessor = append(new BeginNode());
+        if (passingOnTrue) {
+            ifNode.setTrueSuccessor(passingSuccessor);
+        } else {
+            ifNode.setFalseSuccessor(passingSuccessor);
+        }
+        return passingSuccessor;
     }
 
     default void genCheckcastDynamic(ValueNode object, ValueNode javaClass) {
@@ -313,8 +348,13 @@ public interface GraphBuilderContext extends GraphBuilderTool {
             addPush(JavaKind.Object, object);
         } else {
             append(condition);
-            FixedGuardNode fixedGuard = add(new FixedGuardNode(condition, DeoptimizationReason.ClassCastException, DeoptimizationAction.InvalidateReprofile, false));
-            addPush(JavaKind.Object, DynamicPiNode.create(getAssumptions(), getConstantReflection(), object, fixedGuard, javaClass));
+            GuardingNode guardingNode;
+            if (needsExplicitException()) {
+                guardingNode = emitBytecodeExceptionCheck(condition, true, BytecodeExceptionKind.CLASS_CAST, object, javaClass);
+            } else {
+                guardingNode = add(new FixedGuardNode(condition, DeoptimizationReason.ClassCastException, DeoptimizationAction.InvalidateReprofile, false));
+            }
+            addPush(JavaKind.Object, DynamicPiNode.create(getAssumptions(), getConstantReflection(), object, guardingNode, javaClass));
         }
     }
 
@@ -367,10 +407,11 @@ public interface GraphBuilderContext extends GraphBuilderTool {
      * returns true, this method should return non-null begin nodes.
      *
      * @param exceptionKind the type of exception to be created.
+     * @param exceptionArguments the arguments for the exception.
      * @return a begin node that precedes the actual exception instantiation code.
      */
-    default AbstractBeginNode genExplicitExceptionEdge(@SuppressWarnings("ununsed") BytecodeExceptionKind exceptionKind) {
-        return null;
+    default AbstractBeginNode genExplicitExceptionEdge(BytecodeExceptionKind exceptionKind, ValueNode... exceptionArguments) {
+        throw GraalError.unimplemented();
     }
 
     /**
@@ -382,6 +423,15 @@ public interface GraphBuilderContext extends GraphBuilderTool {
      */
     default void replacePlugin(GeneratedInvocationPlugin plugin, ResolvedJavaMethod targetMethod, ValueNode[] args, PluginReplacementNode.ReplacementFunction replacementFunction) {
         throw GraalError.unimplemented();
+    }
+
+    /**
+     * A hook for subclasses to add other instructions around the provided instruction.
+     *
+     * @param instr The instruction used to determine which instructions must be added.
+     */
+    default void processInstruction(FixedWithNextNode instr) {
+        /* By default, no additional processing is needed. */
     }
 }
 

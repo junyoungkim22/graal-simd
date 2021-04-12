@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -45,12 +46,18 @@ import org.graalvm.word.WordFactory;
 import com.oracle.graal.pointsto.BigBang;
 import com.oracle.objectfile.ObjectFile;
 import com.oracle.svm.core.SubstrateOptions;
+import com.oracle.svm.core.config.ConfigurationValues;
+import com.oracle.svm.core.meta.SubstrateObjectConstant;
 import com.oracle.svm.core.util.VMError;
+import com.oracle.svm.hosted.c.CGlobalDataFeature;
+import com.oracle.svm.hosted.code.HostedImageHeapConstantPatch;
 import com.oracle.svm.hosted.code.HostedPatcher;
-import com.oracle.svm.hosted.image.NativeBootImage.NativeTextSectionImpl;
+import com.oracle.svm.hosted.image.NativeImage.NativeTextSectionImpl;
+import com.oracle.svm.hosted.image.NativeImageHeap.ObjectInfo;
 import com.oracle.svm.hosted.meta.HostedMethod;
 import com.oracle.svm.hosted.meta.MethodPointer;
 
+import jdk.vm.ci.code.TargetDescription;
 import jdk.vm.ci.code.site.Call;
 import jdk.vm.ci.code.site.DataPatch;
 import jdk.vm.ci.code.site.Infopoint;
@@ -62,8 +69,11 @@ public class LIRNativeImageCodeCache extends NativeImageCodeCache {
 
     private int codeCacheSize;
 
+    private final TargetDescription target;
+
     public LIRNativeImageCodeCache(Map<HostedMethod, CompilationResult> compilations, NativeImageHeap imageHeap) {
         super(compilations, imageHeap);
+        target = ConfigurationValues.getTarget();
     }
 
     @Override
@@ -144,9 +154,24 @@ public class LIRNativeImageCodeCache extends NativeImageCodeCache {
 
             // Build an index of PatchingAnnoations
             Map<Integer, HostedPatcher> patches = new HashMap<>();
+            ByteBuffer targetCode = null;
             for (CodeAnnotation codeAnnotation : compilation.getCodeAnnotations()) {
                 if (codeAnnotation instanceof HostedPatcher) {
                     patches.put(codeAnnotation.getPosition(), (HostedPatcher) codeAnnotation);
+
+                } else if (codeAnnotation instanceof HostedImageHeapConstantPatch) {
+                    HostedImageHeapConstantPatch patch = (HostedImageHeapConstantPatch) codeAnnotation;
+
+                    ObjectInfo objectInfo = imageHeap.getObjectInfo(SubstrateObjectConstant.asObject(patch.constant));
+                    long objectAddress = objectInfo.getAddress();
+
+                    if (targetCode == null) {
+                        targetCode = ByteBuffer.wrap(compilation.getTargetCode()).order(target.arch.getByteOrder());
+                    }
+                    int originalValue = targetCode.getInt(patch.getPosition());
+                    long newValue = originalValue + objectAddress;
+                    VMError.guarantee(NumUtil.isInt(newValue), "Image heap size is limited to 2 GByte");
+                    targetCode.putInt(patch.getPosition(), (int) newValue);
                 }
             }
             // ... patch direct call sites.
@@ -221,7 +246,8 @@ public class LIRNativeImageCodeCache extends NativeImageCodeCache {
     public List<ObjectFile.Symbol> getSymbols(ObjectFile objectFile, boolean onlyGlobal) {
         Stream<ObjectFile.Symbol> stream = StreamSupport.stream(objectFile.getSymbolTable().spliterator(), false);
         if (onlyGlobal) {
-            stream = stream.filter(ObjectFile.Symbol::isGlobal);
+            Set<String> globalHiddenSymbols = CGlobalDataFeature.singleton().getGlobalHiddenSymbols();
+            stream = stream.filter(symbol -> symbol.isGlobal() && !globalHiddenSymbols.contains(symbol.getName()));
         }
         return stream.filter(ObjectFile.Symbol::isDefined).collect(Collectors.toList());
     }

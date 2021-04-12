@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -152,6 +152,9 @@ public class LoadIndexedNode extends AccessIndexedNode implements Virtualizable,
         if (constant != null) {
             return constant;
         }
+        if (tool.allUsagesAvailable() && hasNoUsages() && getBoundsCheck() != null) {
+            return null;
+        }
         return this;
     }
 
@@ -179,7 +182,7 @@ public class LoadIndexedNode extends AccessIndexedNode implements Virtualizable,
         }
     }
 
-    private static ValueNode tryConstantFold(ValueNode array, ValueNode index, MetaAccessProvider metaAccess, ConstantReflectionProvider constantReflection) {
+    public static ValueNode tryConstantFold(ValueNode array, ValueNode index, MetaAccessProvider metaAccess, ConstantReflectionProvider constantReflection) {
         if (array.isConstant() && !array.isNullConstant() && index.isConstant()) {
             JavaConstant arrayConstant = array.asJavaConstant();
             if (arrayConstant != null) {

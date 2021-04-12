@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,20 +40,23 @@
  */
 package com.oracle.truffle.polyglot;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleOptions;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.impl.AbstractPolyglotImpl;
 import org.graalvm.polyglot.impl.AbstractPolyglotImpl.APIAccess;
 
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Member;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 
 final class HostClassCache {
 
@@ -63,13 +66,34 @@ final class HostClassCache {
     final HostAccess hostAccess;
     private final boolean arrayAccess;
     private final boolean listAccess;
+    private final boolean bufferAccess;
+    private final boolean iterableAccess;
+    private final boolean iteratorAccess;
+    private final boolean mapAccess;
     private final Map<Class<?>, Object> targetMappings;
     private final Object unnamedModule;
+    private final WeakReference<HostClassCache> weakHostClassRef = new WeakReference<>(this);
+
+    private final ClassValue<HostClassDesc> descs = new ClassValue<HostClassDesc>() {
+        @Override
+        protected HostClassDesc computeValue(Class<?> type) {
+            /*
+             * The weak reference is a workaround for JDK-8169425. Cyclic references are not
+             * supported for values in ClassValue. In practice the passed in weak reference should
+             * never become null during a usage of HostClassDesc.
+             */
+            return new HostClassDesc(weakHostClassRef, type);
+        }
+    };
 
     private HostClassCache(AbstractPolyglotImpl.APIAccess apiAccess, HostAccess conf, ClassLoader classLoader) {
         this.hostAccess = conf;
         this.arrayAccess = apiAccess.isArrayAccessible(hostAccess);
         this.listAccess = apiAccess.isListAccessible(hostAccess);
+        this.bufferAccess = apiAccess.isBufferAccessible(hostAccess);
+        this.iterableAccess = apiAccess.isIterableAccessible(hostAccess);
+        this.iteratorAccess = apiAccess.isIteratorAccessible(hostAccess);
+        this.mapAccess = apiAccess.isMapAccessible(hostAccess);
         this.apiAccess = apiAccess;
         this.targetMappings = groupMappings(apiAccess, conf);
         this.unnamedModule = EngineAccessor.JDKSERVICES.getUnnamedModule(classLoader);
@@ -138,8 +162,11 @@ final class HostClassCache {
             }
             list.add(map);
         }
+
         for (Entry<Class<?>, Object> object : localMappings.entrySet()) {
-            object.setValue(((List<?>) object.getValue()).toArray(EMPTY_MAPPINGS));
+            List<PolyglotTargetMapping> classMappings = ((List<PolyglotTargetMapping>) object.getValue());
+            Collections.sort(classMappings);
+            object.setValue(classMappings.toArray(EMPTY_MAPPINGS));
         }
         return localMappings;
     }
@@ -164,13 +191,6 @@ final class HostClassCache {
         return cache;
     }
 
-    private final ClassValue<HostClassDesc> descs = new ClassValue<HostClassDesc>() {
-        @Override
-        protected HostClassDesc computeValue(Class<?> type) {
-            return new HostClassDesc(HostClassCache.this, type);
-        }
-    };
-
     @TruffleBoundary
     public static HostClassCache forInstance(HostObject receiver) {
         return receiver.getEngine().getHostClassCache();
@@ -183,17 +203,31 @@ final class HostClassCache {
 
     @TruffleBoundary
     boolean allowsAccess(Method m) {
-        return apiAccess.allowsAccess(hostAccess, m);
+        return apiAccess.allowsAccess(hostAccess, m) || isGeneratedClassMember(m);
     }
 
     @TruffleBoundary
     boolean allowsAccess(Constructor<?> m) {
-        return apiAccess.allowsAccess(hostAccess, m);
+        return apiAccess.allowsAccess(hostAccess, m) || isGeneratedClassMember(m);
     }
 
     @TruffleBoundary
     boolean allowsAccess(Field f) {
-        return apiAccess.allowsAccess(hostAccess, f);
+        return apiAccess.allowsAccess(hostAccess, f) || isGeneratedClassMember(f);
+    }
+
+    /***
+     * Generated class members are always accessible, i.e., members of implementable interfaces and
+     * classes are implicitly exported through their implementations.
+     */
+    private static boolean isGeneratedClassMember(Member member) {
+        if (TruffleOptions.AOT) {
+            return false;
+        }
+        if (HostAdapterClassLoader.isGeneratedClass(member.getDeclaringClass())) {
+            return true;
+        }
+        return false;
     }
 
     boolean isArrayAccess() {
@@ -204,8 +238,23 @@ final class HostClassCache {
         return listAccess;
     }
 
+    boolean isBufferAccess() {
+        return bufferAccess;
+    }
+
+    boolean isIterableAccess() {
+        return iterableAccess;
+    }
+
+    boolean isIteratorAccess() {
+        return iteratorAccess;
+    }
+
+    boolean isMapAccess() {
+        return mapAccess;
+    }
+
     boolean allowsImplementation(Class<?> type) {
         return apiAccess.allowsImplementation(hostAccess, type);
     }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,6 +84,7 @@ import org.graalvm.compiler.nodes.StartNode;
 import org.graalvm.compiler.nodes.StateSplit;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.GuardsStage;
+import org.graalvm.compiler.nodes.StructuredGraph.StageFlag;
 import org.graalvm.compiler.nodes.UnwindNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.WithExceptionNode;
@@ -103,7 +104,6 @@ import org.graalvm.compiler.phases.util.ValueMergeUtil;
 import org.graalvm.compiler.serviceprovider.SpeculationReasonGroup;
 
 import jdk.vm.ci.code.BytecodeFrame;
-import jdk.vm.ci.meta.Assumptions;
 import jdk.vm.ci.meta.DeoptimizationAction;
 import jdk.vm.ci.meta.DeoptimizationReason;
 import jdk.vm.ci.meta.JavaKind;
@@ -111,6 +111,7 @@ import jdk.vm.ci.meta.JavaTypeProfile;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import jdk.vm.ci.meta.ResolvedJavaType;
 import jdk.vm.ci.meta.SpeculationLog;
+import jdk.vm.ci.meta.TriState;
 
 public class InliningUtil extends ValueMergeUtil {
 
@@ -371,7 +372,7 @@ public class InliningUtil extends ValueMergeUtil {
         final NodeInputList<ValueNode> parameters = invoke.callTarget().arguments();
 
         assert inlineGraph.getGuardsStage().ordinal() >= graph.getGuardsStage().ordinal();
-        assert !invokeNode.graph().isAfterFloatingReadPhase() : "inline isn't handled correctly after floating reads phase";
+        assert invokeNode.graph().isBeforeStage(StageFlag.FLOATING_READS) : "inline isn't handled correctly after floating reads phase";
 
         if (receiverNullCheck && !((MethodCallTargetNode) invoke.callTarget()).isStatic()) {
             nonNullReceiver(invoke);
@@ -476,7 +477,7 @@ public class InliningUtil extends ValueMergeUtil {
             unwindNode = (UnwindNode) duplicates.get(unwindNode);
         }
 
-        finishInlining(invoke, graph, firstCFGNode, returnNodes, unwindNode, inlineGraph.getAssumptions(), inlineGraph);
+        finishInlining(invoke, graph, firstCFGNode, returnNodes, unwindNode, inlineGraph);
         GraphUtil.killCFG(invokeNode);
 
         return duplicates;
@@ -519,7 +520,7 @@ public class InliningUtil extends ValueMergeUtil {
     }
 
     @SuppressWarnings("try")
-    private static ValueNode finishInlining(Invoke invoke, StructuredGraph graph, FixedNode firstNode, List<ReturnNode> returnNodes, UnwindNode unwindNode, Assumptions inlinedAssumptions,
+    private static ValueNode finishInlining(Invoke invoke, StructuredGraph graph, FixedNode firstNode, List<ReturnNode> returnNodes, UnwindNode unwindNode,
                     StructuredGraph inlineGraph) {
         FixedNode invokeNode = invoke.asNode();
         FrameState stateAfter = invoke.stateAfter();
@@ -587,16 +588,6 @@ public class InliningUtil extends ValueMergeUtil {
             returnValue = null;
             invokeNode.replaceAtUsages(null);
             GraphUtil.killCFG(invoke.next());
-        }
-
-        // Copy assumptions from inlinee to caller
-        Assumptions assumptions = graph.getAssumptions();
-        if (assumptions != null) {
-            if (inlinedAssumptions != null) {
-                assumptions.record(inlinedAssumptions);
-            }
-        } else {
-            assert inlinedAssumptions == null : String.format("cannot inline graph (%s) which makes assumptions into a graph (%s) that doesn't", inlineGraph, graph);
         }
 
         // Copy inlined methods from inlinee to caller
@@ -703,13 +694,13 @@ public class InliningUtil extends ValueMergeUtil {
             } else {
                 NodeSourcePosition oldPos = cursor.getKey().getNodeSourcePosition();
                 if (oldPos != null) {
-                    if (inlineeRoot == null) {
-                        assert (inlineeRoot = oldPos.getRootMethod()) != null;
-                    } else {
-                        assert oldPos.verifyRootMethod(inlineeRoot);
-                    }
                     NodeSourcePosition updatedPos = posMap.get(oldPos);
                     if (updatedPos == null) {
+                        if (inlineeRoot == null) {
+                            assert (inlineeRoot = oldPos.getRootMethod()) != null;
+                        } else {
+                            assert oldPos.verifyRootMethod(inlineeRoot);
+                        }
                         updatedPos = oldPos.addCaller(oldPos.getSourceLanguage(), invokePos, isSubstitution);
                         posMap.put(oldPos, updatedPos);
                     }
@@ -1020,13 +1011,16 @@ public class InliningUtil extends ValueMergeUtil {
         }
     }
 
-    private static final SpeculationReasonGroup FALLBACK_DEOPT_SPECULATION = new SpeculationReasonGroup("FallbackDeopt", ResolvedJavaMethod.class, int.class, ReceiverTypeSpeculationContext.class);
+    private static final SpeculationReasonGroup FALLBACK_DEOPT_SPECULATION = new SpeculationReasonGroup("FallbackDeopt", ResolvedJavaMethod.class, int.class, TriState.class,
+                    ReceiverTypeSpeculationContext.class);
 
     public static SpeculationLog.SpeculationReason createSpeculation(Invoke invoke, JavaTypeProfile typeProfile) {
         assert typeProfile.getNotRecordedProbability() == 0.0D;
         FrameState frameState = invoke.stateAfter();
         assert frameState != null;
-        return FALLBACK_DEOPT_SPECULATION.createSpeculationReason(frameState.getMethod(), frameState.bci, new ReceiverTypeSpeculationContext(typeProfile));
+        return FALLBACK_DEOPT_SPECULATION.createSpeculationReason(frameState.getMethod(), invoke.bci(),
+                        frameState.getCode().getProfilingInfo().getExceptionSeen(invoke.bci()),
+                        new ReceiverTypeSpeculationContext(typeProfile));
     }
 
     private static class ReceiverTypeSpeculationContext implements SpeculationReasonGroup.SpeculationContextObject {

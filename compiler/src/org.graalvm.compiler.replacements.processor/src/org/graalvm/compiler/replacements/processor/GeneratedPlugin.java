@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -295,6 +295,7 @@ public abstract class GeneratedPlugin {
                 case DECLARED:
                     out.printf("            %s = %s.asObject(%s.class, %s.asJavaConstant());\n", argName, deps.use(processor, WellKnownDependency.SNIPPET_REFLECTION), getErasedType(type),
                                     argFormatter.apply(nodeIdx));
+                    out.printf("            assert %s != null;\n", argName);
                     break;
                 default:
                     throw new IllegalArgumentException(type.toString());
@@ -306,7 +307,7 @@ public abstract class GeneratedPlugin {
             out.printf("                b.replacePlugin(this, targetMethod, args, %s.FUNCTION);\n", getReplacementName());
             out.printf("                return true;\n");
             out.printf("            }\n");
-            out.printf("            assert b.canDeferPlugin(this) : b.getClass().toString();\n");
+            out.printf("            assert b.canDeferPlugin(this) : b.getClass().toString() + \" \" + %s;\n", argFormatter.apply(nodeIdx));
         }
         out.printf("            return false;\n");
 

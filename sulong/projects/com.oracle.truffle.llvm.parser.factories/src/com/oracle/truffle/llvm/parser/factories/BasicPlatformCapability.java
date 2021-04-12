@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates.
  *
  * All rights reserved.
  *
@@ -33,12 +33,31 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import com.oracle.truffle.llvm.runtime.LLVMSyscallEntry;
-import com.oracle.truffle.llvm.runtime.NFIContextExtension;
+import com.oracle.truffle.llvm.runtime.NativeContextExtension;
 import com.oracle.truffle.llvm.runtime.memory.LLVMSyscallOperationNode;
 import com.oracle.truffle.llvm.runtime.nodes.asm.syscall.LLVMInfo;
 import com.oracle.truffle.llvm.runtime.nodes.asm.syscall.LLVMNativeSyscallNode;
 
 public abstract class BasicPlatformCapability<S extends Enum<S> & LLVMSyscallEntry> extends PlatformCapabilityBase<S> {
+
+    // Flags for DLOpen
+    public static final int RTLD_LAZY = 1;
+    public static final int RTLD_Global = 256;
+
+    @Override
+    public boolean isGlobalDLOpenFlagSet(int flag) {
+        return (flag & RTLD_Global) == RTLD_Global;
+    }
+
+    @Override
+    public boolean isLazyDLOpenFlagSet(int flag) {
+        return (flag & RTLD_LAZY) == RTLD_LAZY;
+    }
+
+    @Override
+    public boolean isFirstDLOpenFlagSet(int flag) {
+        return false;
+    }
 
     public static BasicPlatformCapability<?> create(boolean loadCxxLibraries) {
         if (LLVMInfo.SYSNAME.equalsIgnoreCase("linux")) {
@@ -56,16 +75,16 @@ public abstract class BasicPlatformCapability<S extends Enum<S> & LLVMSyscallEnt
     }
 
     private static final Path SULONG_LIBDIR = Paths.get("native", "lib");
-    public static final String LIBSULONG_FILENAME = "libsulong." + NFIContextExtension.getNativeLibrarySuffix();
-    public static final String LIBSULONGXX_FILENAME = "libsulong++." + NFIContextExtension.getNativeLibrarySuffix();
+    public static final String LIBSULONG_FILENAME = "libsulong." + NativeContextExtension.getNativeLibrarySuffix();
+    public static final String LIBSULONGXX_FILENAME = "libsulong++." + NativeContextExtension.getNativeLibrarySuffix();
 
     protected BasicPlatformCapability(Class<S> cls, boolean loadCxxLibraries) {
         super(cls, loadCxxLibraries);
     }
 
     @Override
-    public String getPolyglotMockLibrary() {
-        return "libpolyglot-mock." + NFIContextExtension.getNativeLibrarySuffix();
+    public String getBuiltinsLibrary() {
+        return "libgraalvm-llvm." + NativeContextExtension.getNativeLibrarySuffixVersioned(1);
     }
 
     @Override
@@ -94,7 +113,7 @@ public abstract class BasicPlatformCapability<S extends Enum<S> & LLVMSyscallEnt
 
     @Override
     public String getLibrarySuffix() {
-        return NFIContextExtension.getNativeLibrarySuffix();
+        return NativeContextExtension.getNativeLibrarySuffix();
     }
 
     protected abstract LLVMSyscallOperationNode createSyscallNode(S syscall);

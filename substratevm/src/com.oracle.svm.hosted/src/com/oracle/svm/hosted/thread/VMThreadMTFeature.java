@@ -27,18 +27,20 @@ package com.oracle.svm.hosted.thread;
 import java.util.List;
 
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
+import org.graalvm.compiler.core.common.NumUtil;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.extended.MembarNode;
+import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugin.Receiver;
-import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins.Registration;
 import org.graalvm.compiler.nodes.memory.OnHeapMemoryAccess.BarrierType;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.nativeimage.ImageSingletons;
 import org.graalvm.nativeimage.IsolateThread;
 
+import com.oracle.svm.core.ParsingReason;
 import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.annotate.AutomaticFeature;
 import com.oracle.svm.core.c.NonmovableArray;
@@ -71,7 +73,6 @@ public class VMThreadMTFeature implements GraalFeature {
 
     private final VMThreadLocalCollector threadLocalCollector = new VMThreadLocalCollector();
     private final VMThreadLocalMTSupport threadLocalSupport = new VMThreadLocalMTSupport();
-    private FastThreadLocal threadLocalAtOffsetZero;
 
     public int getVMThreadSize() {
         assert threadLocalSupport.vmThreadSize != -1 : "not yet initialized";
@@ -99,9 +100,9 @@ public class VMThreadMTFeature implements GraalFeature {
      * access memory that we manage ourselfs.
      */
     @Override
-    public void registerInvocationPlugins(Providers providers, SnippetReflectionProvider snippetReflection, InvocationPlugins invocationPlugins, boolean analysis, boolean hosted) {
+    public void registerInvocationPlugins(Providers providers, SnippetReflectionProvider snippetReflection, Plugins plugins, ParsingReason reason) {
         for (Class<? extends FastThreadLocal> threadLocalClass : VMThreadLocalInfo.THREAD_LOCAL_CLASSES) {
-            Registration r = new Registration(invocationPlugins, threadLocalClass);
+            Registration r = new Registration(plugins.getInvocationPlugins(), threadLocalClass);
             Class<?> valueClass = VMThreadLocalInfo.getValueClass(threadLocalClass);
             registerAccessors(r, valueClass, false);
             registerAccessors(r, valueClass, true);
@@ -125,7 +126,7 @@ public class VMThreadMTFeature implements GraalFeature {
 
         Class<?>[] typesWithGetAddress = new Class<?>[]{FastThreadLocalBytes.class, FastThreadLocalWord.class};
         for (Class<?> type : typesWithGetAddress) {
-            Registration r = new Registration(invocationPlugins, type);
+            Registration r = new Registration(plugins.getInvocationPlugins(), type);
             /* getAddress() method without the VMThread parameter. */
             r.register1("getAddress", Receiver.class, new InvocationPlugin() {
                 @Override
@@ -223,12 +224,6 @@ public class VMThreadMTFeature implements GraalFeature {
         return true;
     }
 
-    public void setThreadLocalAtOffsetZero(FastThreadLocal threadLocal) {
-        VMError.guarantee(threadLocalSupport.vmThreadSize < 0, "VM thread locals have already been placed");
-        VMError.guarantee(threadLocalAtOffsetZero == null, "may not be set more than once");
-        threadLocalAtOffsetZero = threadLocal;
-    }
-
     @Override
     public void duringAnalysis(DuringAnalysisAccess access) {
         /*
@@ -242,19 +237,23 @@ public class VMThreadMTFeature implements GraalFeature {
 
     @Override
     public void beforeCompilation(BeforeCompilationAccess config) {
-        List<VMThreadLocalInfo> sortedThreadLocalInfos = threadLocalCollector.sortThreadLocals(config, threadLocalAtOffsetZero);
+        List<VMThreadLocalInfo> sortedThreadLocalInfos = threadLocalCollector.sortThreadLocals(config);
         SubstrateReferenceMap referenceMap = new SubstrateReferenceMap();
         int nextOffset = 0;
         for (VMThreadLocalInfo info : sortedThreadLocalInfos) {
-            assert nextOffset % Math.min(8, info.sizeInBytes) == 0 : "alignment mismatch: " + info.sizeInBytes + ", " + nextOffset;
+            int alignment = Math.min(8, info.sizeInBytes);
+            nextOffset = NumUtil.roundUp(nextOffset, alignment);
 
             if (info.isObject) {
                 referenceMap.markReferenceAtOffset(nextOffset, true);
             }
             info.offset = nextOffset;
             nextOffset += info.sizeInBytes;
+
+            if (info.offset > info.maxOffset) {
+                VMError.shouldNotReachHere("Too many thread local variables with maximum offset " + info.maxOffset + " defined");
+            }
         }
-        VMError.guarantee(threadLocalAtOffsetZero == null || threadLocalCollector.getInfo(threadLocalAtOffsetZero).offset == 0);
 
         InstanceReferenceMapEncoder encoder = new InstanceReferenceMapEncoder();
         encoder.add(referenceMap);

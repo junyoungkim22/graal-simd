@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -45,6 +45,7 @@ import org.junit.Test;
 
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.source.Source;
+import com.oracle.truffle.api.test.polyglot.AbstractPolyglotTest;
 
 public class LoadNFILibraryTest extends NFITest {
 
@@ -104,8 +105,16 @@ public class LoadNFILibraryTest extends NFITest {
         Assert.assertNotNull(library);
     }
 
-    @Test(expected = UnsatisfiedLinkError.class)
+    @Test
     public void fileNotFound() {
-        eval("load /this/file/does/not/exist.so");
+        AbstractPolyglotTest.assertFails(() -> eval("load /this/file/does/not/exist.so"), loadNFIUnsatisfiedLinkError());
+    }
+
+    static Class<?> loadNFIUnsatisfiedLinkError() {
+        try {
+            return Class.forName("com.oracle.truffle.nfi.backend.libffi.NFIUnsatisfiedLinkError");
+        } catch (ClassNotFoundException cnf) {
+            throw new AssertionError("Cannot load NFIUnsatisfiedLinkError", cnf);
+        }
     }
 }

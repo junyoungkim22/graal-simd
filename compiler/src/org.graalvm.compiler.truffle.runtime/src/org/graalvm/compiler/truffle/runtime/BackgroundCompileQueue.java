@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,9 +29,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RunnableFuture;
@@ -39,6 +39,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import org.graalvm.compiler.truffle.options.PolyglotCompilerOptions;
 
@@ -54,11 +55,11 @@ import org.graalvm.compiler.truffle.options.PolyglotCompilerOptions;
  */
 public class BackgroundCompileQueue {
 
+    protected final GraalTruffleRuntime runtime;
     private final AtomicLong idCounter;
     private volatile ThreadPoolExecutor compilationExecutorService;
-    private volatile IdlingPriorityBlockingQueue<Runnable> compilationQueue;
+    private volatile BlockingQueue<Runnable> compilationQueue;
     private boolean shutdown = false;
-    protected final GraalTruffleRuntime runtime;
     private long delayMillis;
 
     public BackgroundCompileQueue(GraalTruffleRuntime runtime) {
@@ -73,12 +74,14 @@ public class BackgroundCompileQueue {
     }
 
     private ExecutorService getExecutorService(OptimizedCallTarget callTarget) {
-        if (compilationExecutorService != null) {
-            return compilationExecutorService;
+        ExecutorService service = this.compilationExecutorService;
+        if (service != null) {
+            return service;
         }
         synchronized (this) {
-            if (compilationExecutorService != null) {
-                return compilationExecutorService;
+            service = this.compilationExecutorService;
+            if (service != null) {
+                return service;
             }
             if (shutdown) {
                 throw new RejectedExecutionException("The BackgroundCompileQueue is shutdown");
@@ -126,13 +129,14 @@ public class BackgroundCompileQueue {
             long compilerIdleDelay = runtime.getCompilerIdleDelay(callTarget);
             long keepAliveTime = compilerIdleDelay >= 0 ? compilerIdleDelay : 0;
 
-            this.compilationQueue = new IdlingPriorityBlockingQueue<>();
+            initQueue(callTarget);
             ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(threads, threads,
                             keepAliveTime, TimeUnit.MILLISECONDS,
                             compilationQueue, factory) {
                 @Override
+                @SuppressWarnings({"unchecked"})
                 protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
-                    return new RequestFutureTask<>((RequestImpl<T>) callable);
+                    return (RunnableFuture<T>) new CompilationTask.ExecutorServiceWrapper((CompilationTask) callable);
                 }
             };
 
@@ -147,17 +151,34 @@ public class BackgroundCompileQueue {
         }
     }
 
+    private void initQueue(OptimizedCallTarget callTarget) {
+        if (callTarget.getOptionValue(PolyglotCompilerOptions.TraversingCompilationQueue)) {
+            this.compilationQueue = new TraversingBlockingQueue();
+        } else {
+            this.compilationQueue = new IdlingPriorityBlockingQueue<>();
+        }
+    }
+
     @SuppressWarnings("unused")
     protected ThreadFactory newThreadFactory(String threadNamePrefix, OptimizedCallTarget callTarget) {
         return new TruffleCompilerThreadFactory(threadNamePrefix, runtime);
     }
 
-    public CancellableCompileTask submitTask(Priority priority, OptimizedCallTarget target, Request request) {
+    private CompilationTask submitTask(CompilationTask compilationTask) {
+        compilationTask.setFuture(getExecutorService(compilationTask.targetRef.get()).submit(compilationTask));
+        return compilationTask;
+    }
+
+    public CompilationTask submitCompilation(Priority priority, OptimizedCallTarget target) {
         final WeakReference<OptimizedCallTarget> targetReference = new WeakReference<>(target);
-        CancellableCompileTask cancellable = new CancellableCompileTask(targetReference, priority == Priority.LAST_TIER);
-        RequestImpl<Void> requestImpl = new RequestImpl<>(nextId(), priority, targetReference, cancellable, request);
-        cancellable.setFuture(getExecutorService(target).submit(requestImpl));
-        return cancellable;
+        CompilationTask compilationTask = CompilationTask.createCompilationTask(priority, targetReference, nextId());
+        return submitTask(compilationTask);
+    }
+
+    public CompilationTask submitInitialization(OptimizedCallTarget target, Consumer<CompilationTask> action) {
+        final WeakReference<OptimizedCallTarget> targetReference = new WeakReference<>(target);
+        CompilationTask initializationTask = CompilationTask.createInitializationTask(targetReference, action);
+        return submitTask(initializationTask);
     }
 
     private long nextId() {
@@ -167,7 +188,15 @@ public class BackgroundCompileQueue {
     public int getQueueSize() {
         final ExecutorService threadPool = compilationExecutorService;
         if (threadPool instanceof ThreadPoolExecutor) {
-            return ((ThreadPoolExecutor) threadPool).getQueue().size();
+            BlockingQueue<Runnable> queue = ((ThreadPoolExecutor) threadPool).getQueue();
+            int count = 0;
+            for (Runnable runnable : queue) {
+                CompilationTask.ExecutorServiceWrapper wrapper = (CompilationTask.ExecutorServiceWrapper) runnable;
+                if (!wrapper.isCancelled() && !wrapper.compileTask.isCancelled()) {
+                    count++;
+                }
+            }
+            return count;
         } else {
             return 0;
         }
@@ -178,15 +207,15 @@ public class BackgroundCompileQueue {
      * compiled.
      */
     public Collection<OptimizedCallTarget> getQueuedTargets(EngineData engine) {
-        IdlingPriorityBlockingQueue<Runnable> queue = this.compilationQueue;
+        BlockingQueue<Runnable> queue = this.compilationQueue;
         if (queue == null) {
             // queue not initialized
             return Collections.emptyList();
         }
         List<OptimizedCallTarget> queuedTargets = new ArrayList<>();
-        RequestFutureTask<?>[] array = queue.toArray(new RequestFutureTask<?>[0]);
-        for (RequestFutureTask<?> task : array) {
-            OptimizedCallTarget target = task.request.targetRef.get();
+        CompilationTask.ExecutorServiceWrapper[] array = queue.toArray(new CompilationTask.ExecutorServiceWrapper[0]);
+        for (CompilationTask.ExecutorServiceWrapper wrapper : array) {
+            OptimizedCallTarget target = wrapper.compileTask.targetRef.get();
             if (target != null && target.engine == engine) {
                 queuedTargets.add(target);
             }
@@ -212,81 +241,30 @@ public class BackgroundCompileQueue {
         }
     }
 
-    public enum Priority {
+    /**
+     * Called when a compiler thread becomes idle for more than {@code delayMillis}.
+     */
+    protected void compilerThreadIdled() {
+        // nop
+    }
 
-        INITIALIZATION(0),
-        FIRST_TIER(1),
-        LAST_TIER(2);
+    static class Priority {
 
-        private final int value;
+        public static final Priority INITIALIZATION = new Priority(0, Tier.INITIALIZATION);
+        final Tier tier;
+        final int value;
 
-        Priority(int value) {
+        Priority(int value, Tier tier) {
             this.value = value;
+            this.tier = tier;
         }
 
-    }
-
-    public abstract static class Request {
-
-        protected abstract void execute(CancellableCompileTask task, WeakReference<OptimizedCallTarget> targetRef);
-
-    }
-
-    private static final class RequestImpl<V> implements Callable<V>, Comparable<RequestImpl<?>> {
-
-        private final long id;
-        private final Priority priority;
-        private final CancellableCompileTask task;
-        private final WeakReference<OptimizedCallTarget> targetRef;
-        private final Request request;
-
-        RequestImpl(long id, Priority priority, WeakReference<OptimizedCallTarget> targetRef, CancellableCompileTask task, Request request) {
-            this.id = id;
-            this.priority = priority;
-            this.targetRef = targetRef;
-            this.task = task;
-            this.request = request;
+        public enum Tier {
+            INITIALIZATION,
+            FIRST,
+            LAST
         }
 
-        @Override
-        public int compareTo(RequestImpl<?> that) {
-            int diff = priority.value - that.priority.value;
-            if (diff == 0) {
-                diff = Long.compare(this.id, that.id);
-            }
-            return diff;
-        }
-
-        @SuppressWarnings("try")
-        @Override
-        public V call() {
-            request.execute(task, targetRef);
-            return null;
-        }
-
-        @Override
-        public String toString() {
-            return "Request(id:" + id + ", priority:" + priority + " target: " + targetRef.get() + ")";
-        }
-    }
-
-    private static class RequestFutureTask<V> extends FutureTask<V> implements Comparable<RequestFutureTask<?>> {
-        private final RequestImpl<V> request;
-
-        RequestFutureTask(RequestImpl<V> callable) {
-            super(callable);
-            this.request = callable;
-        }
-
-        @Override
-        public int compareTo(RequestFutureTask<?> that) {
-            return this.request.compareTo(that.request);
-        }
-
-        @Override
-        public String toString() {
-            return "Future(" + request + ")";
-        }
     }
 
     private final class TruffleCompilerThreadFactory implements ThreadFactory {
@@ -350,13 +328,6 @@ public class BackgroundCompileQueue {
             // Fallback to blocking version.
             return super.take();
         }
-    }
-
-    /**
-     * Called when a compiler thread becomes idle for more than {@code delayMillis}.
-     */
-    protected void compilerThreadIdled() {
-        // nop
     }
 
 }

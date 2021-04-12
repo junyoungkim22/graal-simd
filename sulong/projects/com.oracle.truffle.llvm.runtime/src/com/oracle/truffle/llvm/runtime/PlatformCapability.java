@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2018, 2021, Oracle and/or its affiliates.
  *
  * All rights reserved.
  *
@@ -34,11 +34,12 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.TruffleFile;
+import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.llvm.runtime.config.LLVMCapability;
 import com.oracle.truffle.llvm.runtime.memory.LLVMSyscallOperationNode;
 import com.oracle.truffle.llvm.runtime.nodes.intrinsics.llvm.va.LLVMVAStart;
-import com.oracle.truffle.llvm.runtime.nodes.intrinsics.llvm.va.LLVMVaListLibrary;
-import com.oracle.truffle.llvm.runtime.pointer.LLVMNativePointer;
+import com.oracle.truffle.llvm.runtime.nodes.intrinsics.llvm.va.LLVMVaListStorage.VAListPointerWrapperFactory;
 import com.oracle.truffle.llvm.runtime.types.Type;
 
 public abstract class PlatformCapability<S extends Enum<S> & LLVMSyscallEntry> implements LLVMCapability {
@@ -49,9 +50,15 @@ public abstract class PlatformCapability<S extends Enum<S> & LLVMSyscallEntry> i
 
     public abstract LLVMSyscallOperationNode createSyscallNode(long index);
 
-    public abstract String getPolyglotMockLibrary();
+    public abstract String getBuiltinsLibrary();
 
     public abstract String getLibrarySuffix();
+
+    public abstract boolean isGlobalDLOpenFlagSet(int flag);
+
+    public abstract boolean isFirstDLOpenFlagSet(int flag);
+
+    public abstract boolean isLazyDLOpenFlagSet(int flag);
 
     @CompilerDirectives.CompilationFinal(dimensions = 1) private final S[] valueToSysCall;
 
@@ -93,22 +100,23 @@ public abstract class PlatformCapability<S extends Enum<S> & LLVMSyscallEntry> i
     }
 
     /**
-     * Inject implicit or modify explicit dependencies for a {@code library}.
+     * Inject implicit or modify explicit dependencies for a {@code file}.
      *
      * @param context the {@link LLVMContext}
-     * @param library the library for which dependencies might be injected
-     * @param dependencies (unmodifiable) list of dependencies specified by the library
+     * @param file the {@link TruffleFile}
+     * @param dependencies (unmodifiable) list of dependencies specified by the file
      */
-    public List<String> preprocessDependencies(LLVMContext context, ExternalLibrary library, List<String> dependencies) {
+    public List<String> preprocessDependencies(LLVMContext context, TruffleFile file, List<String> dependencies) {
         return dependencies;
     }
 
     // va_list interface
 
     /**
+     * @param rootNode TODO
      * @return a new instance of a platform specific managed va_list object
      */
-    public abstract Object createVAListStorage();
+    public abstract Object createVAListStorage(RootNode rootNode);
 
     /**
      * @return the type of a platform specific va_list structure
@@ -116,12 +124,11 @@ public abstract class PlatformCapability<S extends Enum<S> & LLVMSyscallEntry> i
     public abstract Type getVAListType();
 
     /**
-     * @param vaListPtr
-     * @return a new instance of a helper object implementing of {@link LLVMVaListLibrary} for
-     *         native pointers. It allows for {@link LLVMVAStart} and others to treat native LLVM
-     *         pointers to <code>va_list</code> just as the managed <code>va_list</code> objects and
-     *         thus to remain platform independent.
+     * @return a helper node creating auxiliary wrappers for native LLVM pointers and managed
+     *         pointers not pointing to a platform specific <code>va_list</code> managed object. It
+     *         allows for {@link LLVMVAStart} and others to treat LLVM pointers just as the managed
+     *         <code>va_list</code> objects and thus to remain platform independent.
      */
-    public abstract Object createNativeVAListWrapper(LLVMNativePointer vaListPtr);
+    public abstract VAListPointerWrapperFactory createNativeVAListWrapper(boolean cached);
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -57,6 +57,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.ServiceLoader;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.graalvm.options.OptionDescriptor;
 import org.graalvm.options.OptionDescriptors;
@@ -73,12 +75,15 @@ import com.oracle.truffle.api.ContextLocal;
 import com.oracle.truffle.api.ContextThreadLocal;
 import com.oracle.truffle.api.InstrumentInfo;
 import com.oracle.truffle.api.Option;
-import com.oracle.truffle.api.Scope;
+import com.oracle.truffle.api.ThreadLocalAction;
 import com.oracle.truffle.api.TruffleContext;
 import com.oracle.truffle.api.TruffleFile;
 import com.oracle.truffle.api.TruffleLanguage;
 import com.oracle.truffle.api.TruffleLogger;
 import com.oracle.truffle.api.TruffleRuntime;
+import com.oracle.truffle.api.TruffleSafepoint;
+import com.oracle.truffle.api.TruffleSafepoint.Interrupter;
+import com.oracle.truffle.api.TruffleSafepoint.Interruptible;
 import com.oracle.truffle.api.TruffleStackTrace;
 import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.FrameDescriptor;
@@ -148,6 +153,9 @@ public abstract class TruffleInstrument {
      * onCreate} method:
      *
      * {@codesnippet DebuggerExample}
+     * <p>
+     * If this method throws an {@link com.oracle.truffle.api.exception.AbstractTruffleException}
+     * the exception interop messages are executed without a context being entered.
      *
      * @param env environment information for the instrument
      *
@@ -404,7 +412,9 @@ public abstract class TruffleInstrument {
          * Returns a new value for a context local of an instrument. The returned value must not be
          * <code>null</code> and must return a stable and exact type per registered instrument. A
          * thread local must always return the same {@link Object#getClass() class}, even for
-         * multiple instances of the same {@link TruffleInstrument}.
+         * multiple instances of the same {@link TruffleInstrument}. If this method throws an
+         * {@link com.oracle.truffle.api.exception.AbstractTruffleException} the exception interop
+         * messages may be executed without a context being entered.
          *
          * @see TruffleInstrument#createContextLocal(ContextLocalFactory)
          * @since 20.3
@@ -425,7 +435,9 @@ public abstract class TruffleInstrument {
          * value must not be <code>null</code> and must return a stable and exact type per
          * registered instrument. A thread local must always return the same
          * {@link Object#getClass() class}, even for multiple instances of the same
-         * {@link TruffleInstrument}.
+         * {@link TruffleInstrument}. If this method throws an
+         * {@link com.oracle.truffle.api.exception.AbstractTruffleException} the exception interop
+         * messages may be executed without a context being entered.
          *
          * @see TruffleInstrument#createContextThreadLocal(ContextThreadLocalFactory)
          * @since 20.3
@@ -767,6 +779,15 @@ public abstract class TruffleInstrument {
             }
         }
 
+        /**
+         * Returns the entered {@link TruffleContext} or {@code null} when no context is entered.
+         *
+         * @since 20.3
+         */
+        public TruffleContext getEnteredContext() {
+            return InstrumentAccessor.ENGINE.getCurrentCreatorTruffleContext();
+        }
+
         private static class GuardedExecutableNode extends ExecutableNode {
 
             private final FrameDescriptor frameDescriptor;
@@ -929,9 +950,14 @@ public abstract class TruffleInstrument {
          * @param frame the frame of the current activation of the parent {@link RootNode}.
          * @param value the value to provide scope information for.
          *
-         * @see TruffleLanguage#getScopedView(Object, Node, Frame, Object)
+         * @see com.oracle.truffle.api.interop.NodeLibrary#getView(Object, Frame, Object)
          * @since 20.1
+         * @deprecated in 20.3 for removal, use {@link #getLanguageView(LanguageInfo, Object)}
+         *             followed by
+         *             {@link com.oracle.truffle.api.interop.NodeLibrary#getView(Object, Frame, Object)}
+         *             instead.
          */
+        @Deprecated
         @TruffleBoundary
         public Object getScopedView(LanguageInfo language, Node location, Frame frame, Object value) {
             try {
@@ -1112,8 +1138,11 @@ public abstract class TruffleInstrument {
          * @see TruffleLanguage#findLocalScopes(java.lang.Object, com.oracle.truffle.api.nodes.Node,
          *      com.oracle.truffle.api.frame.Frame)
          * @since 0.30
+         * @deprecated in 20.3, use NodeLibrary instead.
          */
-        public Iterable<Scope> findLocalScopes(Node node, Frame frame) {
+        @Deprecated
+        @SuppressWarnings("deprecation")
+        public Iterable<com.oracle.truffle.api.Scope> findLocalScopes(Node node, Frame frame) {
             try {
                 RootNode rootNode = node.getRootNode();
                 if (rootNode == null) {
@@ -1123,8 +1152,7 @@ public abstract class TruffleInstrument {
                 if (languageInfo == null) {
                     throw new IllegalArgumentException("The root node " + rootNode + " does not have a language associated.");
                 }
-                final TruffleLanguage.Env env = InstrumentAccessor.engineAccess().getEnvForInstrument(languageInfo);
-                Iterable<Scope> langScopes = InstrumentAccessor.langAccess().findLocalScopes(env, node, frame);
+                Iterable<com.oracle.truffle.api.Scope> langScopes = InstrumentAccessor.engineAccess().findLibraryLocalScopesToLegacy(node, frame);
                 assert langScopes != null : languageInfo.getId();
                 return langScopes;
             } catch (Throwable t) {
@@ -1141,15 +1169,35 @@ public abstract class TruffleInstrument {
          *         language
          * @see TruffleLanguage#findTopScopes(java.lang.Object)
          * @since 0.30
+         * @deprecated in 20.3, use {@link #getScope(LanguageInfo)} instead.
          */
-        public Iterable<Scope> findTopScopes(String languageId) {
+        @Deprecated
+        @SuppressWarnings("deprecation")
+        public Iterable<com.oracle.truffle.api.Scope> findTopScopes(String languageId) {
+            LanguageInfo languageInfo = getLanguages().get(languageId);
+            if (languageInfo == null) {
+                throw new IllegalArgumentException("Unknown language: " + languageId + ". Known languages are: " + getLanguages().keySet());
+            }
+            Object scope = getScope(languageInfo);
+            return InstrumentAccessor.engineAccess().topScopesToLegacy(scope);
+        }
+
+        /**
+         * Provides top scope object of the language, if any. Uses the current context to find the
+         * language scope associated with. The returned object is an
+         * {@link com.oracle.truffle.api.interop.InteropLibrary#isScope(Object) interop scope
+         * object}, or <code>null</code>.
+         *
+         * @param language a language
+         * @return the top scope, or <code>null</code> if the language does not support such concept
+         * @see TruffleLanguage#getScope(Object)
+         * @since 20.3
+         */
+        public Object getScope(LanguageInfo language) {
+            assert language != null;
             try {
-                LanguageInfo languageInfo = getLanguages().get(languageId);
-                if (languageInfo == null) {
-                    throw new IllegalArgumentException("Unknown language: " + languageId + ". Known languages are: " + getLanguages().keySet());
-                }
-                final TruffleLanguage.Env env = InstrumentAccessor.engineAccess().getEnvForInstrument(languageInfo);
-                return findTopScopes(env);
+                final TruffleLanguage.Env env = InstrumentAccessor.engineAccess().getEnvForInstrument(language);
+                return InstrumentAccessor.langAccess().getScope(env);
             } catch (Throwable t) {
                 throw engineToInstrumentException(t);
             }
@@ -1212,8 +1260,9 @@ public abstract class TruffleInstrument {
             return getLogger(forClass.getName());
         }
 
-        static Iterable<Scope> findTopScopes(TruffleLanguage.Env env) {
-            Iterable<Scope> langScopes = InstrumentAccessor.langAccess().findTopScopes(env);
+        @SuppressWarnings("deprecation")
+        static Iterable<com.oracle.truffle.api.Scope> findTopScopes(TruffleLanguage.Env env) {
+            Iterable<com.oracle.truffle.api.Scope> langScopes = InstrumentAccessor.langAccess().findTopScopes(env);
             assert langScopes != null : InstrumentAccessor.langAccess().getLanguageInfo(env).getId();
             return langScopes;
         }
@@ -1271,6 +1320,91 @@ public abstract class TruffleInstrument {
             }
         }
 
+        /**
+         * Returns heap memory size retained by a polyglot context.
+         *
+         * @param truffleContext specifies the polyglot context for which retained size is
+         *            calculated.
+         * @param stopAtBytes when the calculated size exceeds stopAtBytes, calculation is stopped
+         *            and only size calculated up to that point is returned, i.e., if the retained
+         *            size is greater than stopAtBytes, a value greater than stopAtBytes will be
+         *            returned, not the total retained size which might be much greater.
+         * @param cancelled when cancelled returns true, calculation is cancelled and
+         *            {@link java.util.concurrent.CancellationException} is thrown. The message of
+         *            the exception specifies the number of bytes calculated up to that point.
+         * @return calculated heap memory size retained by the specified polyglot context, or a
+         *         value greater than stopAtBytes if the calculated size is greater than
+         *         stopAtBytes.
+         *
+         * @throws UnsupportedOperationException in case heap size calculation is not supported on
+         *             current runtime.
+         * @throws java.util.concurrent.CancellationException in case the heap size calculation is
+         *             cancelled based on the cancelled parameter. The message of the exception
+         *             specifies the number of bytes calculated up to that point.
+         * @since 21.1
+         */
+        public long calculateContextHeapSize(TruffleContext truffleContext, long stopAtBytes, AtomicBoolean cancelled) {
+            return InstrumentAccessor.engineAccess().calculateContextHeapSize(InstrumentAccessor.langAccess().getPolyglotContext(truffleContext), stopAtBytes, cancelled);
+        }
+
+        /**
+         * Submits a thread local action to be performed at the next guest language safepoint on a
+         * provided set of threads, once for each thread. If the threads array is <code>null</code>
+         * then the thread local action will be performed on all alive threads. The submitted
+         * actions are processed in the same order as they are submitted in. The action can be
+         * synchronous or asynchronous, side-effecting or non-sideeffecting. Please see
+         * {@link ThreadLocalAction} for details.
+         * <p>
+         * It is ensured that a thread local action will get processed as long as the thread stays
+         * active for this context. If a thread becomes inactive before the action can get processed
+         * then the action will not be performed for this thread. If a thread becomes active while
+         * the action is being processed then the action will be performed for that thread as long
+         * as the thread filter includes the thread or <code>null</code> was passed. Already started
+         * synchronous actions will block on activation of a new thread. If the synchronous action
+         * was not yet started on any thread, then the synchronous action will also be performed for
+         * the newly activated thread.
+         * <p>
+         * The method returns a {@link Future} instance that allows to wait for the thread local
+         * action to complete or to cancel a currently performed event.
+         * <p>
+         * Example Usage:
+         *
+         * <pre>
+         * Env env; // supplied by TruffleInstrument
+         * TruffleContext context; // supplied by ContextsListener
+         *
+         * env.submitThreadLocal(context, null, new ThreadLocalAction(true, true) {
+         *     &#64;Override
+         *     protected void perform(Access access) {
+         *         // perform action
+         *     }
+         * });
+         * </pre>
+         *
+         * <p>
+         * If the thread local action future needs to be waited on and this might be prone to
+         * deadlocks the
+         * {@link TruffleSafepoint#setBlocked(Node, Interrupter, Interruptible, Object, Runnable, Runnable)
+         * blocking API} can be used to allow other thread local actions to be processed while the
+         * current thread is waiting. The returned {@link Future#get()} method can be used as
+         * {@link Interruptible}.
+         *
+         * @param context the context in which the action should be performed. Non <code>null</code>
+         *            .
+         * @param threads the threads to execute the action on. <code>null</code> for all threads
+         * @param action the action to perform on that thread.
+         * @see ThreadLocalAction
+         * @see TruffleSafepoint
+         * @since 21.1
+         */
+        public Future<Void> submitThreadLocal(TruffleContext context, Thread[] threads, ThreadLocalAction action) {
+            Objects.requireNonNull(context);
+            try {
+                return InstrumentAccessor.ENGINE.submitThreadLocal(InstrumentAccessor.LANGUAGE.getPolyglotContext(context), this.polyglotInstrument, threads, action, true);
+            } catch (Throwable t) {
+                throw engineToInstrumentException(t);
+            }
+        }
     }
 
     /**

@@ -43,7 +43,7 @@ suite = {
 
   "name" : "regex",
 
-  "version" : "20.3.0",
+  "version" : "21.1.0",
   "release" : False,
   "groupId" : "org.graalvm.regex",
   "url" : "http://www.graalvm.org/",
@@ -93,7 +93,7 @@ suite = {
       "exports" : [
         "com.oracle.truffle.regex.chardata",
       ],
-      "checkstyleVersion" : "8.8",
+      "checkstyleVersion" : "8.36.1",
       "javaCompliance" : "8+",
       "workingSets" : "Truffle,Regex",
       "spotbugsIgnoresGenerated" : True,

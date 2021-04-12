@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,7 @@ import jdk.vm.ci.code.MemoryBarriers;
 public abstract class AbstractNewObjectNode extends DeoptimizingFixedWithNextNode implements Lowerable {
 
     public static final NodeClass<AbstractNewObjectNode> TYPE = NodeClass.create(AbstractNewObjectNode.class);
-    protected final boolean fillContents;
+    protected boolean fillContents;
 
     /**
      * Controls whether this allocation emits a {@link MembarNode} with
@@ -62,6 +62,10 @@ public abstract class AbstractNewObjectNode extends DeoptimizingFixedWithNextNod
      */
     public boolean fillContents() {
         return fillContents;
+    }
+
+    public void setFillContents(boolean fillContents) {
+        this.fillContents = fillContents;
     }
 
     @Override

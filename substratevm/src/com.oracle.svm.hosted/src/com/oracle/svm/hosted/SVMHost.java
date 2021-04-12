@@ -42,6 +42,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.BiConsumer;
 
 import org.graalvm.compiler.core.common.spi.ForeignCallDescriptor;
@@ -65,12 +67,14 @@ import com.oracle.graal.pointsto.BigBang;
 import com.oracle.graal.pointsto.api.HostVM;
 import com.oracle.graal.pointsto.api.PointstoOptions;
 import com.oracle.graal.pointsto.constraints.UnsupportedFeatureException;
+import com.oracle.graal.pointsto.flow.AnalysisParsedGraph;
 import com.oracle.graal.pointsto.infrastructure.OriginalClassProvider;
 import com.oracle.graal.pointsto.meta.AnalysisField;
 import com.oracle.graal.pointsto.meta.AnalysisMethod;
 import com.oracle.graal.pointsto.meta.AnalysisType;
 import com.oracle.graal.pointsto.meta.AnalysisUniverse;
 import com.oracle.graal.pointsto.meta.HostedProviders;
+import com.oracle.svm.core.RuntimeAssertionsSupport;
 import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.annotate.UnknownClass;
 import com.oracle.svm.core.annotate.UnknownObjectField;
@@ -79,10 +83,13 @@ import com.oracle.svm.core.classinitialization.EnsureClassInitializedNode;
 import com.oracle.svm.core.graal.meta.SubstrateForeignCallLinkage;
 import com.oracle.svm.core.graal.meta.SubstrateForeignCallsProvider;
 import com.oracle.svm.core.graal.stackvalue.StackValueNode;
+import com.oracle.svm.core.heap.StoredContinuation;
 import com.oracle.svm.core.heap.Target_java_lang_ref_Reference;
 import com.oracle.svm.core.hub.DynamicHub;
 import com.oracle.svm.core.hub.HubType;
 import com.oracle.svm.core.hub.ReferenceType;
+import com.oracle.svm.core.jdk.ClassLoaderSupport;
+import com.oracle.svm.core.jdk.RecordSupport;
 import com.oracle.svm.core.option.SubstrateOptionsParser;
 import com.oracle.svm.core.util.HostedStringDeduplication;
 import com.oracle.svm.core.util.VMError;
@@ -91,6 +98,8 @@ import com.oracle.svm.hosted.classinitialization.ClassInitializationSupport;
 import com.oracle.svm.hosted.code.InliningUtilities;
 import com.oracle.svm.hosted.meta.HostedType;
 import com.oracle.svm.hosted.phases.AnalysisGraphBuilderPhase;
+import com.oracle.svm.hosted.phases.IntrinsifyMethodHandlesInvocationPlugin.IntrinsificationRegistry;
+import com.oracle.svm.hosted.snippets.ReflectionPlugins.ReflectionPluginRegistry;
 import com.oracle.svm.hosted.substitute.UnsafeAutomaticSubstitutionProcessor;
 import com.oracle.svm.util.ReflectionUtil;
 
@@ -106,6 +115,7 @@ public final class SVMHost implements HostVM {
     private final Map<String, EnumSet<AnalysisType.UsageKind>> forbiddenTypes;
 
     private final OptionValues options;
+    private final ForkJoinPool executor;
     private final ClassLoader classLoader;
     private final ClassInitializationSupport classInitializationSupport;
     private final HostedStringDeduplication stringTable;
@@ -128,11 +138,12 @@ public final class SVMHost implements HostVM {
     private final ConcurrentMap<AnalysisMethod, Boolean> analysisTrivialMethods = new ConcurrentHashMap<>();
 
     private static final Method isHiddenMethod = JavaVersionUtil.JAVA_SPEC >= 15 ? ReflectionUtil.lookupMethod(Class.class, "isHidden") : null;
-    private static final Method isRecordMethod = JavaVersionUtil.JAVA_SPEC >= 15 ? ReflectionUtil.lookupMethod(Class.class, "isRecord") : null;
     private static final Method getNestHostMethod = JavaVersionUtil.JAVA_SPEC >= 11 ? ReflectionUtil.lookupMethod(Class.class, "getNestHost") : null;
 
-    public SVMHost(OptionValues options, ClassLoader classLoader, ClassInitializationSupport classInitializationSupport, UnsafeAutomaticSubstitutionProcessor automaticSubstitutions) {
+    public SVMHost(OptionValues options, ForkJoinPool executor, ClassLoader classLoader, ClassInitializationSupport classInitializationSupport,
+                    UnsafeAutomaticSubstitutionProcessor automaticSubstitutions) {
         this.options = options;
+        this.executor = executor;
         this.classLoader = classLoader;
         this.classInitializationSupport = classInitializationSupport;
         this.stringTable = HostedStringDeduplication.singleton();
@@ -142,7 +153,7 @@ public final class SVMHost implements HostVM {
     }
 
     private static Map<String, EnumSet<AnalysisType.UsageKind>> setupForbiddenTypes(OptionValues options) {
-        String[] forbiddenTypesOptionValues = SubstrateOptions.ReportAnalysisForbiddenType.getValue(options);
+        List<String> forbiddenTypesOptionValues = SubstrateOptions.ReportAnalysisForbiddenType.getValue(options).values();
         Map<String, EnumSet<AnalysisType.UsageKind>> forbiddenTypes = new HashMap<>();
         for (String forbiddenTypesOptionValue : forbiddenTypesOptionValues) {
             String[] typeNameUsageKind = forbiddenTypesOptionValue.split(":", 2);
@@ -191,6 +202,11 @@ public final class SVMHost implements HostVM {
     }
 
     @Override
+    public ForkJoinPool executor() {
+        return executor;
+    }
+
+    @Override
     public Instance createGraphBuilderPhase(HostedProviders providers, GraphBuilderConfiguration graphBuilderConfig, OptimisticOptimizations optimisticOpts, IntrinsicContext initialIntrinsicContext) {
         return new AnalysisGraphBuilderPhase(providers, graphBuilderConfig, optimisticOpts, initialIntrinsicContext, providers.getWordTypes());
     }
@@ -234,13 +250,42 @@ public final class SVMHost implements HostVM {
 
     @Override
     public void registerType(AnalysisType analysisType) {
-        classInitializationSupport.maybeInitializeHosted(analysisType);
 
         DynamicHub hub = createHub(analysisType);
+        /* Register the hub->type and type->hub mappings. */
         Object existing = typeToHub.put(analysisType, hub);
         assert existing == null;
         existing = hubToType.put(hub, analysisType);
         assert existing == null;
+
+    }
+
+    @Override
+    public void initializeType(AnalysisType analysisType) {
+        if (!analysisType.isReachable()) {
+            throw VMError.shouldNotReachHere("Registering and initializing a type that was not yet marked as reachable: " + analysisType);
+        }
+
+        /* Decide when the type should be initialized. */
+        classInitializationSupport.maybeInitializeHosted(analysisType);
+
+        /*
+         * For reachable classes, registering class's package in appropriate class loader.
+         */
+        Class<?> javaClass = analysisType.getJavaClass();
+        /**
+         * Due to using {@link NativeImageSystemClassLoader}, a class's ClassLoader during runtime
+         * may be different than the class used to load it during native-image generation.
+         */
+        ClassLoader runtimeClassLoader = ClassLoaderFeature.getRuntimeClassLoader(javaClass.getClassLoader());
+        if (runtimeClassLoader != null) {
+            Package packageValue = javaClass.getPackage();
+            if (packageValue != null) {
+                DynamicHub typeHub = typeToHub.get(analysisType);
+                String packageName = typeHub.getPackageName();
+                ClassLoaderSupport.registerPackage(runtimeClassLoader, packageName, packageValue);
+            }
+        }
 
         /* Compute the automatic substitutions. */
         automaticSubstitutions.computeSubstitutions(this, GraalAccess.getOriginalProviders().getMetaAccess().lookupJavaType(analysisType.getJavaClass()), options);
@@ -275,6 +320,7 @@ public final class SVMHost implements HostVM {
         } else {
             throw VMError.shouldNotReachHere("Found unsupported type: " + type);
         }
+        /* Ensure that the hub is registered in both typeToHub and hubToType. */
         return typeToHub.get(aType);
     }
 
@@ -314,11 +360,9 @@ public final class SVMHost implements HostVM {
          * JDK 15 added support for Hidden Classes. Record if this javaClass is hidden.
          */
         boolean isHidden = false;
-        boolean isRecord = false;
         if (JavaVersionUtil.JAVA_SPEC >= 15) {
             try {
                 isHidden = (boolean) isHiddenMethod.invoke(javaClass);
-                isRecord = (boolean) isRecordMethod.invoke(javaClass);
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw VMError.shouldNotReachHere(e);
             }
@@ -333,8 +377,11 @@ public final class SVMHost implements HostVM {
             }
         }
 
-        final DynamicHub dynamicHub = new DynamicHub(className, computeHubType(type), computeReferenceType(type), type.isLocal(), isAnonymousClass(javaClass), superHub, componentHub, sourceFileName,
-                        modifiers, hubClassLoader, isHidden, isRecord, nestHost);
+        boolean isRecord = RecordSupport.singleton().isRecord(javaClass);
+        boolean assertionStatus = RuntimeAssertionsSupport.singleton().desiredAssertionStatus(javaClass);
+
+        final DynamicHub dynamicHub = new DynamicHub(javaClass, className, computeHubType(type), computeReferenceType(type), type.isLocal(), isAnonymousClass(javaClass), superHub, componentHub,
+                        sourceFileName, modifiers, hubClassLoader, isHidden, isRecord, nestHost, assertionStatus);
         if (JavaVersionUtil.JAVA_SPEC > 8) {
             ModuleAccess.extractAndSetModule(dynamicHub, javaClass);
         }
@@ -342,22 +389,22 @@ public final class SVMHost implements HostVM {
     }
 
     /**
-     * @return boolean if class is available or NoClassDefFoundError if class' parents are not on
-     *         the classpath or InternalError if the class is invalid.
+     * @return boolean if class is available or LinkageError if class' parents are not on the
+     *         classpath or InternalError if the class is invalid.
      */
     private static Object isAnonymousClass(Class<?> javaClass) {
         try {
             return javaClass.isAnonymousClass();
         } catch (InternalError e) {
             return e;
-        } catch (NoClassDefFoundError e) {
+        } catch (LinkageError e) {
             if (NativeImageOptions.AllowIncompleteClasspath.getValue()) {
                 return e;
             } else {
                 String message = "Discovered a type for which isAnonymousClass can't be called: " + javaClass.getTypeName() +
                                 ". To avoid this issue at build time use the " +
                                 SubstrateOptionsParser.commandArgument(NativeImageOptions.AllowIncompleteClasspath, "+") +
-                                " option. The NoClassDefFoundError will then be reported at run time when this method is called for the first time.";
+                                " option. The LinkageError will then be reported at run time when this method is called for the first time.";
                 throw new UnsupportedFeatureException(message);
             }
         }
@@ -379,9 +426,9 @@ public final class SVMHost implements HostVM {
         classReachabilityListeners.add(listener);
     }
 
-    void notifyClassReachabilityListener(AnalysisUniverse universe, DuringAnalysisAccess access) {
+    public void notifyClassReachabilityListener(AnalysisUniverse universe, DuringAnalysisAccess access) {
         for (AnalysisType type : universe.getTypes()) {
-            if ((type.isInTypeCheck() || type.isInstantiated()) && !type.getReachabilityListenerNotified()) {
+            if (type.isReachable() && !type.getReachabilityListenerNotified()) {
                 type.setReachabilityListenerNotified(true);
 
                 for (BiConsumer<DuringAnalysisAccess, Class<?>> listener : classReachabilityListeners) {
@@ -409,6 +456,8 @@ public final class SVMHost implements HostVM {
         } else if (type.isInstanceClass()) {
             if (Reference.class.isAssignableFrom(type.getJavaClass())) {
                 return HubType.InstanceReference;
+            } else if (type.getJavaClass().equals(StoredContinuation.class)) {
+                return HubType.StoredContinuation;
             }
             assert !Target_java_lang_ref_Reference.class.isAssignableFrom(type.getJavaClass()) : "should not see substitution type here";
             return HubType.Instance;
@@ -446,8 +495,21 @@ public final class SVMHost implements HostVM {
         }
     }
 
+    private final List<BiConsumer<AnalysisMethod, StructuredGraph>> methodAfterParsingHooks = new CopyOnWriteArrayList<>();
+
+    public void addMethodAfterParsingHook(BiConsumer<AnalysisMethod, StructuredGraph> methodAfterParsingHook) {
+        methodAfterParsingHooks.add(methodAfterParsingHook);
+    }
+
     @Override
-    public void checkMethod(BigBang bb, AnalysisMethod method, StructuredGraph graph) {
+    public void methodAfterParsingHook(BigBang bb, AnalysisMethod method, StructuredGraph graph) {
+        for (BiConsumer<AnalysisMethod, StructuredGraph> methodAfterParsingHook : methodAfterParsingHooks) {
+            methodAfterParsingHook.accept(method, graph);
+        }
+    }
+
+    @Override
+    public void methodBeforeTypeFlowCreationHook(BigBang bb, AnalysisMethod method, StructuredGraph graph) {
         if (method.isEntryPoint() && !Modifier.isStatic(graph.method().getModifiers())) {
             ValueNode receiver = graph.start().stateAfter().localAt(0);
             if (receiver != null && receiver.hasUsages()) {
@@ -571,5 +633,20 @@ public final class SVMHost implements HostVM {
 
     public boolean isAnalysisTrivialMethod(AnalysisMethod method) {
         return analysisTrivialMethods.containsKey(method);
+    }
+
+    @Override
+    @SuppressWarnings("try")
+    public AnalysisParsedGraph parseBytecode(BigBang bb, AnalysisMethod analysisMethod) {
+        /*
+         * Temporarily pause the thread local registries. The results of parsing need to be
+         * persistent.
+         */
+        try (AutoCloseable ignored1 = ReflectionPluginRegistry.pauseThreadLocalRegistry();
+                        AutoCloseable ignored2 = IntrinsificationRegistry.pauseThreadLocalRegistry()) {
+            return AnalysisParsedGraph.parseBytecode(bb, analysisMethod);
+        } catch (Throwable e) {
+            throw bb.getDebug().handle(e);
+        }
     }
 }

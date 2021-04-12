@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,7 +47,7 @@ import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.meta.TriState;
 
 /**
- * Common super-class for "a < b" comparisons both {@linkplain IntegerLowerThanNode signed} and
+ * Common super-class for "a < b" comparisons both {@linkplain IntegerLessThanNode signed} and
  * {@linkplain IntegerBelowNode unsigned}.
  */
 @NodeInfo()

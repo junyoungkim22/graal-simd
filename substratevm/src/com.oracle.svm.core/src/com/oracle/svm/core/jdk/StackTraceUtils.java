@@ -26,10 +26,13 @@ package com.oracle.svm.core.jdk;
 
 import java.util.ArrayList;
 
+import com.oracle.svm.core.thread.JavaContinuations;
+import com.oracle.svm.core.thread.Target_java_lang_Continuation;
 import org.graalvm.nativeimage.IsolateThread;
 import org.graalvm.util.DirectAnnotationAccess;
 import org.graalvm.word.Pointer;
 
+import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.code.FrameInfoQueryResult;
 import com.oracle.svm.core.stack.JavaStackFrameVisitor;
 import com.oracle.svm.core.stack.JavaStackWalker;
@@ -43,14 +46,28 @@ public class StackTraceUtils {
     private static final Class<?>[] NO_CLASSES = new Class<?>[0];
     private static final StackTraceElement[] NO_ELEMENTS = new StackTraceElement[0];
 
+    /**
+     * Captures the stack trace of the current thread. Used by {@link Throwable#fillInStackTrace()},
+     * {@link Thread#getStackTrace()}, and {@link Thread#getAllStackTraces()}.
+     *
+     * Captures at most {@link SubstrateOptions#MaxJavaStackTraceDepth} stack trace elements if max
+     * depth > 0, or all if max depth <= 0.
+     */
     public static StackTraceElement[] getStackTrace(boolean filterExceptions, Pointer startSP) {
-        BuildStackTraceVisitor visitor = new BuildStackTraceVisitor(filterExceptions);
+        BuildStackTraceVisitor visitor = new BuildStackTraceVisitor(filterExceptions, SubstrateOptions.MaxJavaStackTraceDepth.getValue());
         JavaStackWalker.walkCurrentThread(startSP, visitor);
         return visitor.trace.toArray(NO_ELEMENTS);
     }
 
+    /**
+     * Captures the stack trace of another thread. Used by {@link Thread#getStackTrace()} and
+     * {@link Thread#getAllStackTraces()}.
+     *
+     * Captures at most {@link SubstrateOptions#MaxJavaStackTraceDepth} stack trace elements if max
+     * depth > 0, or all if max depth <= 0.
+     */
     public static StackTraceElement[] getStackTrace(boolean filterExceptions, IsolateThread thread) {
-        BuildStackTraceVisitor visitor = new BuildStackTraceVisitor(filterExceptions);
+        BuildStackTraceVisitor visitor = new BuildStackTraceVisitor(filterExceptions, SubstrateOptions.MaxJavaStackTraceDepth.getValue());
         JavaStackWalker.walkThread(thread, visitor);
         return visitor.trace.toArray(NO_ELEMENTS);
     }
@@ -114,6 +131,15 @@ public class StackTraceUtils {
             return false;
         }
 
+        if (JavaContinuations.useLoom() && clazz == Target_java_lang_Continuation.class) {
+            // Skip intrinsics in JDK
+            if ("enterSpecial".equals(frameInfo.getSourceMethodName())) {
+                return false;
+            } else if ("doYield".equals(frameInfo.getSourceMethodName())) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -148,10 +174,12 @@ public class StackTraceUtils {
 class BuildStackTraceVisitor extends JavaStackFrameVisitor {
     private final boolean filterExceptions;
     final ArrayList<StackTraceElement> trace;
+    final int limit;
 
-    BuildStackTraceVisitor(boolean filterExceptions) {
+    BuildStackTraceVisitor(boolean filterExceptions, int limit) {
         this.filterExceptions = filterExceptions;
         this.trace = new ArrayList<>();
+        this.limit = limit;
     }
 
     @Override
@@ -170,6 +198,9 @@ class BuildStackTraceVisitor extends JavaStackFrameVisitor {
 
         StackTraceElement sourceReference = frameInfo.getSourceReference();
         trace.add(sourceReference);
+        if (trace.size() == limit) {
+            return false;
+        }
         return true;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -42,8 +42,6 @@ package org.graalvm.launcher;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -72,8 +70,6 @@ class MultiLanguageShell implements Closeable {
     private static final String WIDGET_NAME = "CHANGE_LANGUAGE_WIDGET";
     private final Map<Language, History> histories = new HashMap<>();
     private final Context context;
-    private final InputStream in;
-    private final OutputStream out;
     private final String startLanguage;
     private final List<Language> languages;
     private final Map<String, Language> prompts;
@@ -84,10 +80,8 @@ class MultiLanguageShell implements Closeable {
     private boolean verboseErrors = false;
     private String input = "";
 
-    MultiLanguageShell(Context context, InputStream in, OutputStream out, String defaultStartLanguage) throws IOException {
+    MultiLanguageShell(Context context, String defaultStartLanguage) throws IOException {
         this.context = context;
-        this.in = in;
-        this.out = out;
         this.languages = languages();
         this.prompts = prompts();
         this.terminal = terminal();
@@ -248,15 +242,16 @@ class MultiLanguageShell implements Closeable {
         reader = LineReaderBuilder.builder().terminal(terminal).appName("GraalVM MultiLanguage Shell " + context.getEngine().getVersion()).history(
                         histories.computeIfAbsent(currentLanguage, language -> new DefaultHistory())).build();
         for (String s : reader.getKeyMaps().keySet()) {
-            reader.getKeyMaps().get(s).bind(new Reference(WIDGET_NAME), KeyMap.alt('l'));
+            reader.getKeyMaps().get(s).bind(new Reference(WIDGET_NAME), KeyMap.ctrl('n'));
             reader.getWidgets().put(WIDGET_NAME, () -> {
                 throw new ChangeLanguageException(null);
             });
         }
     }
 
-    private Terminal terminal() throws IOException {
-        return TerminalBuilder.builder().jansi(true).jna(false).streams(in, out).system(true).signalHandler(Terminal.SignalHandler.SIG_IGN).build();
+    private static Terminal terminal() throws IOException {
+        // Create a system Terminal. JANSI and JNA are not shipped in the SDK JLINE3 jar.
+        return TerminalBuilder.builder().jansi(false).jna(false).system(true).signalHandler(Terminal.SignalHandler.SIG_IGN).build();
     }
 
     private Map<String, Language> prompts() {
@@ -294,7 +289,7 @@ class MultiLanguageShell implements Closeable {
             println("  " + promptsString + "    to switch to a language.");
         } else {
             println("Usage: ");
-            println("  Use Alt+L to switch language and Ctrl+D to exit.");
+            println("  Use Ctrl+n to switch language and Ctrl+d to exit.");
             println("  Enter -usage to get a list of available commands.");
         }
     }

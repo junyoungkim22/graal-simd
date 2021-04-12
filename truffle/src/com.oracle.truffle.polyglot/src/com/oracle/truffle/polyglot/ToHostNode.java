@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -54,6 +54,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,6 +63,7 @@ import java.util.function.Function;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Value;
 
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.GenerateUncached;
@@ -78,19 +80,26 @@ import com.oracle.truffle.api.profiles.BranchProfile;
 abstract class ToHostNode extends Node {
     static final int LIMIT = 5;
 
-    /** Custom or lossless conversion to primitive type (incl. unboxing). */
-    static final int STRICT = 0;
-    /** Wrapping (Map, List) or array conversion; int to char. */
-    static final int LOOSE = 1;
+    /** Reserved for target type mappings with highest precedence. */
+    static final int HIGHEST = 0;
+    /** Direct (subtype) or lossless conversion to primitive type (incl. unboxing). */
+    static final int STRICT = 1;
+    /** Wrapping (Map, List, Function) or semi-lossy mapping (e.g. Instant) conversion. */
+    static final int LOOSE = 2;
+    /** Coercing conversion: Host array (copying) or int to char conversion. */
+    static final int COERCE = 3;
     /** Wrap executable into functional interface proxy. */
-    static final int FUNCTION_PROXY = 2;
+    static final int FUNCTION_PROXY = 4;
     /** Wrap object with members into arbitrary interface proxy. */
-    static final int OBJECT_PROXY = 3;
+    static final int OBJECT_PROXY_IFACE = 5;
+    /** Wrap object with members into arbitrary interface or class proxy. */
+    static final int OBJECT_PROXY_CLASS = 6;
     /** Host object to interface proxy conversion. */
-    static final int HOST_PROXY = 4;
+    static final int HOST_PROXY = 7;
+    /** Reserved for target type mappings with lowest. */
+    static final int LOWEST = 8;
 
-    static final int MAX = HOST_PROXY;
-    static final int[] PRIORITIES = {STRICT, LOOSE, FUNCTION_PROXY, OBJECT_PROXY, HOST_PROXY};
+    static final int[] PRIORITIES = {HIGHEST, STRICT, LOOSE, COERCE, FUNCTION_PROXY, OBJECT_PROXY_IFACE, OBJECT_PROXY_CLASS, HOST_PROXY, LOWEST};
 
     public abstract Object execute(Object value, Class<?> targetType, Type genericType, PolyglotLanguageContext languageContext, boolean useTargetMapping);
 
@@ -115,10 +124,11 @@ abstract class ToHostNode extends Node {
         if (languagecontext == null) {
             return false;
         }
-        if (!type.isInterface()) {
+        if (!HostInteropReflect.isAbstractType(type)) {
             return false;
         }
-        return languagecontext.getEngine().getHostClassCache().forClass(type).isAllowsImplementation();
+        HostClassDesc classDesc = languagecontext.getEngine().getHostClassCache().forClass(type);
+        return classDesc.isAllowsImplementation() && classDesc.isAllowedTargetType();
     }
 
     @Specialization(replaces = "doCached")
@@ -177,11 +187,70 @@ abstract class ToHostNode extends Node {
         return value.toString();
     }
 
-    static Object convertLossy(Object value, Class<?> targetType, InteropLibrary interop) {
-        Object convertedValue = convertLossLess(value, targetType, interop);
-        if (convertedValue != null) {
-            return convertedValue;
-        } else if (targetType == char.class || targetType == Character.class) {
+    private static Object convertImpl(Object value, Class<?> targetType, Type genericType, boolean allowsImplementation, boolean primitiveTargetType,
+                    PolyglotLanguageContext languageContext, InteropLibrary interop, boolean useCustomTargetTypes, TargetMappingNode targetMapping, BranchProfile error) {
+        if (useCustomTargetTypes) {
+            Object result = targetMapping.execute(value, targetType, languageContext, interop, false, HIGHEST, STRICT);
+            if (result != TargetMappingNode.NO_RESULT) {
+                return result;
+            }
+        }
+        Object convertedValue;
+        if (primitiveTargetType) {
+            convertedValue = convertLossLess(value, targetType, interop);
+            if (convertedValue != null) {
+                return convertedValue;
+            }
+        }
+        if (HostObject.isJavaInstance(targetType, value)) {
+            return HostObject.valueOf(value);
+        }
+
+        if (useCustomTargetTypes) {
+            convertedValue = targetMapping.execute(value, targetType, languageContext, interop, false, STRICT + 1, LOOSE);
+            if (convertedValue != TargetMappingNode.NO_RESULT) {
+                return convertedValue;
+            }
+        }
+
+        if (primitiveTargetType) {
+            convertedValue = convertLossy(value, targetType, interop);
+            if (convertedValue != null) {
+                return convertedValue;
+            }
+        }
+
+        if (targetType == Value.class && languageContext != null) {
+            return value instanceof Value ? value : languageContext.asValue(value);
+        } else if (interop.isNull(value)) {
+            if (targetType.isPrimitive()) {
+                throw HostInteropErrors.nullCoercion(languageContext, value, targetType);
+            }
+            return null;
+        } else if (value instanceof TruffleObject) {
+            convertedValue = asJavaObject((TruffleObject) value, targetType, genericType, allowsImplementation, languageContext);
+            if (convertedValue != null) {
+                return convertedValue;
+            }
+            // no default conversion available but we can still try target type mappings.
+        }
+        if (targetType.isInstance(value)) {
+            convertedValue = value;
+        } else {
+            if (useCustomTargetTypes) {
+                Object result = targetMapping.execute(value, targetType, languageContext, interop, false, LOOSE + 1, LOWEST);
+                if (result != TargetMappingNode.NO_RESULT) {
+                    return result;
+                }
+            }
+            error.enter();
+            throw HostInteropErrors.cannotConvertPrimitive(languageContext, value, targetType);
+        }
+        return targetType.cast(convertedValue);
+    }
+
+    private static Object convertLossy(Object value, Class<?> targetType, InteropLibrary interop) {
+        if (targetType == char.class || targetType == Character.class) {
             if (interop.fitsInInt(value)) {
                 try {
                     int v = interop.asInt(value);
@@ -189,52 +258,11 @@ abstract class ToHostNode extends Node {
                         return (char) v;
                     }
                 } catch (UnsupportedMessageException e) {
+                    CompilerDirectives.shouldNotReachHere(e);
                 }
             }
         }
         return null;
-    }
-
-    private static Object convertImpl(Object value, Class<?> targetType, Type genericType, boolean allowsImplementation, boolean primitiveTargetType,
-                    PolyglotLanguageContext languageContext, InteropLibrary interop, boolean useCustomTargetTypes, TargetMappingNode targetMapping, BranchProfile error) {
-        if (useCustomTargetTypes) {
-            Object result = targetMapping.execute(value, targetType, languageContext, interop, false);
-            if (result != TargetMappingNode.NO_RESULT) {
-                return result;
-            }
-        }
-        Object convertedValue;
-        if (primitiveTargetType) {
-            convertedValue = convertLossy(value, targetType, interop);
-            if (convertedValue != null) {
-                return convertedValue;
-            }
-        }
-        if (targetType == Value.class && languageContext != null) {
-            convertedValue = value instanceof Value ? value : languageContext.asValue(value);
-        } else if (value instanceof TruffleObject) {
-            convertedValue = asJavaObject((TruffleObject) value, targetType, genericType, allowsImplementation, languageContext);
-        } else if (targetType.isAssignableFrom(value.getClass())) {
-            convertedValue = value;
-        } else {
-            error.enter();
-            throw HostInteropErrors.cannotConvertPrimitive(languageContext, value, targetType);
-        }
-        return targetType.cast(convertedValue);
-    }
-
-    static boolean canConvertToPrimitive(Object value, Class<?> targetType, InteropLibrary interop) {
-        if (HostObject.isJavaInstance(targetType, value)) {
-            return true;
-        }
-        if (!isPrimitiveTarget(targetType)) {
-            return false;
-        }
-        Object convertedValue = convertLossLess(value, targetType, interop);
-        if (convertedValue != null) {
-            return true;
-        }
-        return false;
     }
 
     @SuppressWarnings({"unused"})
@@ -243,66 +271,87 @@ abstract class ToHostNode extends Node {
                     InteropLibrary interop,
                     TargetMappingNode targetMapping) {
         if (targetMapping != null) {
-            if (targetMapping.execute(value, targetType, languageContext, interop, true) == Boolean.TRUE) {
+            /*
+             * For canConvert the order of target type mappings does not really matter, as the
+             * question is whether any conversion can be performed.
+             */
+            if (targetMapping.execute(value, targetType, languageContext, interop, true, HIGHEST, priority) == Boolean.TRUE) {
                 return true;
             }
         }
-        if (canConvertToPrimitive(value, targetType, interop)) {
+        if (priority <= HIGHEST) {
+            return false;
+        }
+
+        if (interop.isNull(value)) {
+            if (targetType.isPrimitive()) {
+                return false;
+            }
+            return true;
+        } else if (targetType == Value.class && languageContext != null) {
+            return true;
+        } else if (isPrimitiveTarget(targetType)) {
+            Object convertedValue = convertLossLess(value, targetType, interop);
+            if (convertedValue != null) {
+                return true;
+            }
+        }
+        if (HostObject.isJavaInstance(targetType, value)) {
             return true;
         }
+
         if (priority <= STRICT) {
             return false;
         }
-        if (targetType == char.class || targetType == Character.class) {
-            if (interop.fitsInInt(value)) {
-                try {
-                    int v = interop.asInt(value);
-                    if (v >= 0 && v < 65536) {
-                        return true;
-                    }
-                } catch (UnsupportedMessageException e) {
-                }
+
+        if (targetType == Object.class) {
+            return true;
+        }
+
+        if (targetType == List.class) {
+            return interop.hasArrayElements(value);
+        } else if (targetType == Map.class) {
+            return interop.hasMembers(value);
+        } else if (targetType == Function.class) {
+            return interop.isExecutable(value) || interop.isInstantiable(value);
+        } else if (targetType == LocalDate.class) {
+            return interop.isDate(value);
+        } else if (targetType == LocalTime.class) {
+            return interop.isTime(value);
+        } else if (targetType == LocalDateTime.class) {
+            return interop.isDate(value) && interop.isTime(value);
+        } else if (targetType == ZonedDateTime.class || targetType == Date.class || targetType == Instant.class) {
+            return interop.isInstant(value);
+        } else if (targetType == ZoneId.class) {
+            return interop.isTimeZone(value);
+        } else if (targetType == Duration.class) {
+            return interop.isDuration(value);
+        } else if (targetType == PolyglotException.class) {
+            return interop.isException(value);
+        }
+
+        if (priority <= LOOSE) {
+            return false;
+        }
+
+        if (targetType.isArray()) {
+            return interop.hasArrayElements(value);
+        } else if (isPrimitiveTarget(targetType)) {
+            Object convertedValue = convertLossy(value, targetType, interop);
+            if (convertedValue != null) {
+                return true;
             }
         }
-        if (targetType == Value.class && languageContext != null) {
-            return true;
-        } else if (value instanceof TruffleObject) {
-            if (interop.isNull(value)) {
-                if (targetType.isPrimitive()) {
-                    return false;
-                }
-                return true;
-            } else if (targetType == Object.class) {
-                return true;
-            } else if (HostObject.isJavaInstance(targetType, value)) {
-                return true;
-            } else if (targetType == List.class) {
-                return interop.hasArrayElements(value);
-            } else if (targetType == Map.class) {
-                return interop.hasMembers(value);
-            } else if (targetType.isArray()) {
-                return interop.hasArrayElements(value);
-            } else if (targetType == LocalDate.class) {
-                return interop.isDate(value);
-            } else if (targetType == LocalTime.class) {
-                return interop.isTime(value);
-            } else if (targetType == LocalDateTime.class) {
-                return interop.isDate(value) && interop.isTime(value);
-            } else if (targetType == ZonedDateTime.class || targetType == Date.class || targetType == Instant.class) {
-                return interop.isInstant(value);
-            } else if (targetType == ZoneId.class) {
-                return interop.isTimeZone(value);
-            } else if (targetType == Duration.class) {
-                return interop.isDuration(value);
-            } else if (targetType == PolyglotException.class) {
-                return interop.isException(value);
-            } else if (priority < HOST_PROXY && HostObject.isInstance(value)) {
+
+        if (value instanceof TruffleObject) {
+            if (priority < HOST_PROXY && HostObject.isInstance(value)) {
                 return false;
             } else {
                 if (priority >= FUNCTION_PROXY && HostInteropReflect.isFunctionalInterface(targetType) &&
                                 (interop.isExecutable(value) || interop.isInstantiable(value)) && checkAllowsImplementation(targetType, allowsImplementation, languageContext)) {
                     return true;
-                } else if (priority >= OBJECT_PROXY && targetType.isInterface() && interop.hasMembers(value) &&
+                } else if (((priority >= OBJECT_PROXY_IFACE && targetType.isInterface()) || (priority >= OBJECT_PROXY_CLASS && HostInteropReflect.isAbstractType(targetType))) &&
+                                interop.hasMembers(value) &&
                                 checkAllowsImplementation(targetType, allowsImplementation, languageContext)) {
                     return true;
                 } else {
@@ -359,6 +408,10 @@ abstract class ToHostNode extends Node {
                 return asJavaObject(value, Map.class, null, false, languageContext);
             } else if (interop.hasArrayElements(value)) {
                 return asJavaObject(value, List.class, null, false, languageContext);
+            } else if (interop.hasIterator(value)) {
+                return asJavaObject(value, Iterable.class, null, false, languageContext);
+            } else if (interop.isIterator(value)) {
+                return asJavaObject(value, Iterator.class, null, false, languageContext);
             } else if (interop.isExecutable(value) || interop.isInstantiable(value)) {
                 return asJavaObject(value, Function.class, null, false, languageContext);
             }
@@ -392,15 +445,10 @@ abstract class ToHostNode extends Node {
 
     @TruffleBoundary
     private static <T> T asJavaObject(Object value, Class<T> targetType, Type genericType, boolean allowsImplementation, PolyglotLanguageContext languageContext) {
-        Objects.requireNonNull(value);
         InteropLibrary interop = InteropLibrary.getFactory().getUncached(value);
+        assert !interop.isNull(value); // already handled
         Object obj;
-        if (interop.isNull(value)) {
-            if (targetType.isPrimitive()) {
-                throw HostInteropErrors.nullCoercion(languageContext, value, targetType);
-            }
-            return null;
-        } else if (HostObject.isJavaInstance(targetType, value)) {
+        if (HostObject.isJavaInstance(targetType, value)) {
             obj = HostObject.valueOf(value);
         } else if (targetType == Object.class) {
             obj = convertToObject(value, languageContext, interop);
@@ -413,18 +461,28 @@ abstract class ToHostNode extends Node {
                 throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have array elements.");
             }
         } else if (targetType == Map.class) {
-            Class<?> keyClazz = getGenericParameterType(genericType, 0).clazz;
+            TypeAndClass<?> keyType = getGenericParameterType(genericType, 0);
             TypeAndClass<?> valueType = getGenericParameterType(genericType, 1);
-            if (!isSupportedMapKeyType(keyClazz)) {
-                throw newInvalidKeyTypeException(keyClazz);
+            boolean hasHashEntries = interop.hasHashEntries(value);
+            if (!hasHashEntries && !isSupportedMapKeyType(keyType.clazz)) {
+                throw newInvalidKeyTypeException(keyType.clazz);
             }
-            boolean hasSize = (Number.class.isAssignableFrom(keyClazz)) && interop.hasArrayElements(value);
-            boolean hasKeys = (keyClazz == Object.class || keyClazz == String.class) && interop.hasMembers(value);
-            if (hasKeys || hasSize) {
+            boolean hasSize = (Number.class.isAssignableFrom(keyType.clazz)) && interop.hasArrayElements(value);
+            boolean hasKeys = (keyType.clazz == Object.class || keyType.clazz == String.class) && interop.hasMembers(value);
+            if (hasKeys || hasSize || hasHashEntries) {
                 boolean implementsFunction = shouldImplementFunction(value, interop);
-                obj = PolyglotMap.create(languageContext, value, implementsFunction, keyClazz, valueType.clazz, valueType.type);
+                obj = PolyglotMap.create(languageContext, value, implementsFunction, keyType.clazz, keyType.type, valueType.clazz, valueType.type);
             } else {
-                throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have members or array elements.");
+                throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have members, array elements or hash entries.");
+            }
+        } else if (targetType == Map.Entry.class) {
+            if (interop.hasArrayElements(value)) {
+                TypeAndClass<?> keyType = getGenericParameterType(genericType, 0);
+                TypeAndClass<?> valueType = getGenericParameterType(genericType, 1);
+                boolean implementsFunction = shouldImplementFunction(value, interop);
+                obj = PolyglotMapEntry.create(languageContext, value, implementsFunction, keyType.clazz, keyType.type, valueType.clazz, valueType.type);
+            } else {
+                throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have array elements.");
             }
         } else if (targetType == Function.class) {
             TypeAndClass<?> returnType = getGenericParameterType(genericType, 1);
@@ -533,16 +591,40 @@ abstract class ToHostNode extends Node {
             } else {
                 throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must be an exception.");
             }
-        } else if (allowsImplementation && targetType.isInterface()) {
+        } else if (targetType == Iterable.class) {
+            if (interop.hasIterator(value)) {
+                boolean implementsFunction = shouldImplementFunction(value, interop);
+                TypeAndClass<?> elementType = getGenericParameterType(genericType, 0);
+                obj = PolyglotIterable.create(languageContext, value, implementsFunction, elementType.clazz, elementType.type);
+            } else if (allowsImplementation && interop.hasMembers(value)) {
+                obj = HostInteropReflect.newProxyInstance(targetType, value, languageContext);
+            } else {
+                throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have an iterator.");
+            }
+        } else if (targetType == Iterator.class) {
+            if (interop.isIterator(value)) {
+                boolean implementsFunction = shouldImplementFunction(value, interop);
+                TypeAndClass<?> elementType = getGenericParameterType(genericType, 0);
+                obj = PolyglotIterator.create(languageContext, value, implementsFunction, elementType.clazz, elementType.type);
+            } else if (allowsImplementation && interop.hasMembers(value)) {
+                obj = HostInteropReflect.newProxyInstance(targetType, value, languageContext);
+            } else {
+                throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must be an iterator.");
+            }
+        } else if (allowsImplementation && HostInteropReflect.isAbstractType(targetType)) {
             if (HostInteropReflect.isFunctionalInterface(targetType) && (interop.isExecutable(value) || interop.isInstantiable(value))) {
                 obj = HostInteropReflect.asJavaFunction(targetType, value, languageContext);
             } else if (interop.hasMembers(value)) {
-                obj = HostInteropReflect.newProxyInstance(targetType, value, languageContext);
+                if (targetType.isInterface()) {
+                    obj = HostInteropReflect.newProxyInstance(targetType, value, languageContext);
+                } else {
+                    obj = HostInteropReflect.newAdapterInstance(targetType, value, languageContext);
+                }
             } else {
                 throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Value must have members.");
             }
         } else {
-            throw HostInteropErrors.cannotConvert(languageContext, value, targetType, "Unsupported target type.");
+            return null;
         }
         assert targetType.isInstance(obj);
         return targetType.cast(obj);
@@ -557,7 +639,7 @@ abstract class ToHostNode extends Node {
         } catch (ThreadDeath e) {
             throw e;
         } catch (Throwable e) {
-            return PolyglotImpl.guestToHostException(languageContext, e);
+            return PolyglotImpl.guestToHostException(languageContext, e, true);
         }
     }
 

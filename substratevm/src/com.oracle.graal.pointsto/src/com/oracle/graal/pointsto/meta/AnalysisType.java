@@ -50,7 +50,6 @@ import com.oracle.graal.pointsto.BigBang;
 import com.oracle.graal.pointsto.BigBang.ConstantObjectsProfiler;
 import com.oracle.graal.pointsto.api.DefaultUnsafePartition;
 import com.oracle.graal.pointsto.api.PointstoOptions;
-import com.oracle.graal.pointsto.api.UnsafePartitionKind;
 import com.oracle.graal.pointsto.constraints.UnsupportedFeatureException;
 import com.oracle.graal.pointsto.flow.AllInstantiatedTypeFlow;
 import com.oracle.graal.pointsto.flow.TypeFlow;
@@ -59,6 +58,8 @@ import com.oracle.graal.pointsto.flow.context.object.ConstantContextSensitiveObj
 import com.oracle.graal.pointsto.infrastructure.OriginalClassProvider;
 import com.oracle.graal.pointsto.infrastructure.WrappedJavaType;
 import com.oracle.graal.pointsto.typestate.TypeState;
+import com.oracle.graal.pointsto.util.AnalysisFuture;
+import com.oracle.svm.util.UnsafePartitionKind;
 
 import jdk.vm.ci.common.JVMCIError;
 import jdk.vm.ci.meta.Assumptions.AssumptionResult;
@@ -69,6 +70,7 @@ import jdk.vm.ci.meta.PrimitiveConstant;
 import jdk.vm.ci.meta.ResolvedJavaField;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import jdk.vm.ci.meta.ResolvedJavaType;
+import jdk.vm.ci.meta.Signature;
 
 public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Comparable<AnalysisType> {
 
@@ -84,7 +86,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
 
     private boolean isInHeap;
     private boolean isAllocated;
-    private boolean isInTypeCheck;
+    private boolean isReachable;
     private boolean reachabilityListenerNotified;
     private boolean unsafeFieldsRecomputed;
     private boolean unsafeAccessedFieldsRegistered;
@@ -96,6 +98,8 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
      * value fields, thus we use the UNSAFE_ACCESS_FIELDS_UPDATER to initialize it.
      */
     private volatile ConcurrentHashMap<UnsafePartitionKind, Collection<AnalysisField>> unsafeAccessedFields;
+
+    private static final AnalysisType[] EMPTY_ARRAY = {};
 
     AnalysisType[] subTypes;
     AnalysisType superClass;
@@ -148,11 +152,15 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     /* isArray is an expensive operation so we eagerly compute it */
     private boolean isArray;
 
+    private final int dimension;
+
     public enum UsageKind {
         InHeap,
         Allocated,
-        InTypeCheck;
+        Reachable;
     }
+
+    private final AnalysisFuture<Void> initializationTask;
 
     AnalysisType(AnalysisUniverse universe, ResolvedJavaType javaType, JavaKind storageKind, AnalysisType objectType) {
         this.universe = universe;
@@ -179,30 +187,33 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
              */
         }
 
+        subTypes = EMPTY_ARRAY;
         /* Ensure the super types as well as the component type (for arrays) is created too. */
         superClass = universe.lookup(wrapped.getSuperclass());
         interfaces = convertTypes(wrapped.getInterfaces());
         if (isArray()) {
             this.componentType = universe.lookup(wrapped.getComponentType());
-            int dimension = 0;
+            int dim = 0;
             AnalysisType elemType = this;
             while (elemType.isArray()) {
                 elemType = elemType.getComponentType();
-                dimension++;
+                dim++;
             }
             if (elemType.getSuperclass() != null) {
-                elemType.getSuperclass().getArrayClass(dimension);
+                elemType.getSuperclass().getArrayClass(dim);
             }
             this.elementalType = elemType;
-            if (dimension >= 2) {
-                objectType.getArrayClass(dimension - 1);
+            if (dim >= 2) {
+                objectType.getArrayClass(dim - 1);
             }
             for (AnalysisType interf : elemType.getInterfaces()) {
-                interf.getArrayClass(dimension);
+                interf.getArrayClass(dim);
             }
+            dimension = dim;
         } else {
             this.componentType = null;
             this.elementalType = this;
+            dimension = 0;
         }
 
         /* Set id after accessing super types, so that all these types get a lower id number. */
@@ -212,6 +223,9 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         this.referencedTypes = null;
 
         assert getSuperclass() == null || getId() > getSuperclass().getId();
+
+        /* The registration task initializes the type. */
+        this.initializationTask = new AnalysisFuture<>(() -> universe.hostVM.initializeType(this), null);
     }
 
     private AnalysisType[] convertTypes(ResolvedJavaType[] originalTypes) {
@@ -226,9 +240,9 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         return result.toArray(new AnalysisType[result.size()]);
     }
 
-    public AnalysisType getArrayClass(int dimension) {
+    public AnalysisType getArrayClass(int dim) {
         AnalysisType result = this;
-        for (int i = 0; i < dimension; i++) {
+        for (int i = 0; i < dim; i++) {
             result = result.getArrayClass();
         }
         return result;
@@ -526,6 +540,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
             assert isArray() || (isInstanceClass() && !Modifier.isAbstract(getModifiers())) : this;
             universe.hostVM.checkForbidden(this, UsageKind.InHeap);
         }
+        registerAsReachable();
     }
 
     /**
@@ -539,14 +554,25 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
             assert isArray() || (isInstanceClass() && !Modifier.isAbstract(getModifiers())) : this;
             universe.hostVM.checkForbidden(this, UsageKind.Allocated);
         }
+        registerAsReachable();
     }
 
-    public void registerAsInTypeCheck() {
-        if (!isInTypeCheck) {
+    public void registerAsReachable() {
+        if (!isReachable) {
+            if (superClass != null) {
+                /*
+                 * The super class must be registered as reachable before this class because other
+                 * threads may query the fields which also collects the super class fields. Field
+                 * lookup guarantees that the type has already been marked as reachable.
+                 */
+                superClass.registerAsReachable();
+            }
+            for (AnalysisType iface : interfaces) {
+                iface.registerAsReachable();
+            }
             /* Races are not a problem because every thread is going to do the same steps. */
-            isInTypeCheck = true;
-
-            universe.hostVM.checkForbidden(this, UsageKind.InTypeCheck);
+            isReachable = true;
+            universe.hostVM.checkForbidden(this, UsageKind.Reachable);
             if (isArray()) {
                 /*
                  * For array types, distinguishing between "used" and "instantiated" does not
@@ -555,8 +581,24 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
                  * without the need of explicit registration of types for reflection.
                  */
                 registerAsAllocated(null);
+
+                componentType.registerAsReachable();
+                if (elementalType.isInterface()) {
+                    universe.objectType().getArrayClass(dimension).registerAsReachable();
+                }
+                if (dimension >= 2) {
+                    universe.objectType().getArrayClass(dimension - 1).registerAsReachable();
+                }
             }
+
+            /* Schedule the registration task. */
+            universe.hostVM.executor().execute(initializationTask);
         }
+    }
+
+    public void ensureInitialized() {
+        /* Run the registration and wait for it to complete, if necessary. */
+        initializationTask.ensureDone();
     }
 
     public boolean getReachabilityListenerNotified() {
@@ -665,7 +707,9 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     }
 
     public boolean isInstantiated() {
-        return isInHeap || isAllocated;
+        boolean instantiated = isInHeap || isAllocated;
+        assert !instantiated || isReachable;
+        return instantiated;
     }
 
     /**
@@ -677,8 +721,8 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         return unsafeFieldsRecomputed;
     }
 
-    public boolean isInTypeCheck() {
-        return isInTypeCheck;
+    public boolean isReachable() {
+        return isReachable;
     }
 
     /**
@@ -895,16 +939,42 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         return universe.lookup(wrapped.findInstanceFieldWithOffset(offset, expectedKind));
     }
 
-    private final AnalysisField[][] instanceFieldsCache = new AnalysisField[2][];
+    /**
+     * Cache to ensure that the final contents of AnalysisField[] are visible after the array gets
+     * visible.
+     */
+    private static class InstanceFieldsCache {
+        private volatile AnalysisField[] withSuper;
+        private volatile AnalysisField[] local;
+
+        public AnalysisField[] get(boolean includeSuperclasses) {
+            if (includeSuperclasses) {
+                return withSuper;
+            } else {
+                return local;
+            }
+        }
+
+        public AnalysisField[] put(boolean includeSuperclasses, AnalysisField[] value) {
+            if (includeSuperclasses) {
+                withSuper = value;
+            } else {
+                local = value;
+            }
+            return value;
+        }
+    }
+
+    private final InstanceFieldsCache instanceFieldsCache = new InstanceFieldsCache();
 
     @Override
     public AnalysisField[] getInstanceFields(boolean includeSuperclasses) {
-        int cacheIdx = includeSuperclasses ? 1 : 0;
-        AnalysisField[] result = instanceFieldsCache[cacheIdx];
+        InstanceFieldsCache cache = instanceFieldsCache;
+        AnalysisField[] result = cache.get(includeSuperclasses);
         if (result != null) {
             return result;
         } else {
-            return instanceFieldsCache[cacheIdx] = convertInstanceFields(includeSuperclasses);
+            return cache.put(includeSuperclasses, convertInstanceFields(includeSuperclasses));
         }
     }
 
@@ -966,7 +1036,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
 
     @Override
     public String toString() {
-        return "AnalysisType<" + toJavaName(true) + ", allocated: " + isAllocated + ", inHeap: " + isInHeap + ", inTypeCheck: " + isInTypeCheck + ">";
+        return "AnalysisType<" + toJavaName(true) + ", allocated: " + isAllocated + ", inHeap: " + isInHeap + ", reachable: " + isReachable + ">";
     }
 
     @Override
@@ -995,8 +1065,8 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         ResolvedJavaType wrappedEnclosingType;
         try {
             wrappedEnclosingType = wrapped.getEnclosingType();
-        } catch (NoClassDefFoundError e) {
-            /* Ignore NoClassDefFoundError thrown by enclosing type resolution. */
+        } catch (LinkageError e) {
+            /* Ignore LinkageError thrown by enclosing type resolution. */
             return null;
         }
         return universe.lookup(wrappedEnclosingType);
@@ -1010,6 +1080,16 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     @Override
     public AnalysisMethod[] getDeclaredMethods() {
         return universe.lookup(wrapped.getDeclaredMethods());
+    }
+
+    @Override
+    public AnalysisMethod findMethod(String name, Signature signature) {
+        for (AnalysisMethod method : getDeclaredMethods()) {
+            if (method.getName().equals(name) && method.getSignature().equals(signature)) {
+                return method;
+            }
+        }
+        return null;
     }
 
     @Override

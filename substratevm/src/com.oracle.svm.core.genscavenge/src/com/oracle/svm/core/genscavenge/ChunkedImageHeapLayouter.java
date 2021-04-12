@@ -33,19 +33,19 @@ import com.oracle.svm.core.SubstrateUtil;
 import com.oracle.svm.core.genscavenge.ChunkedImageHeapAllocator.AlignedChunk;
 import com.oracle.svm.core.genscavenge.ChunkedImageHeapAllocator.Chunk;
 import com.oracle.svm.core.genscavenge.ChunkedImageHeapAllocator.UnalignedChunk;
-import com.oracle.svm.core.image.AbstractImageHeapLayouter;
 import com.oracle.svm.core.image.ImageHeap;
 import com.oracle.svm.core.image.ImageHeapLayoutInfo;
-import com.oracle.svm.core.image.ImageHeapObject;
 
 public class ChunkedImageHeapLayouter extends AbstractImageHeapLayouter<ChunkedImageHeapPartition> {
     private final ImageHeapInfo heapInfo;
+    private final long startOffset;
     private final boolean compressedNullPadding;
     private final long hugeObjectThreshold;
     private ChunkedImageHeapAllocator allocator;
 
-    public ChunkedImageHeapLayouter(ImageHeapInfo heapInfo, boolean compressedNullPadding) {
+    public ChunkedImageHeapLayouter(ImageHeapInfo heapInfo, long startOffset, boolean compressedNullPadding) {
         this.heapInfo = heapInfo;
+        this.startOffset = startOffset;
         this.compressedNullPadding = compressedNullPadding;
         this.hugeObjectThreshold = HeapPolicy.getLargeArrayThreshold().rawValue();
     }
@@ -68,14 +68,14 @@ public class ChunkedImageHeapLayouter extends AbstractImageHeapLayouter<ChunkedI
     @Override
     protected ImageHeapLayoutInfo doLayout(ImageHeap imageHeap) {
         assert !compressedNullPadding || AlignedHeapChunk.getObjectsStartOffset().aboveThan(0) : "Expecting header to pad start so object offsets are strictly greater than 0";
-        allocator = new ChunkedImageHeapAllocator(imageHeap, 0);
+        allocator = new ChunkedImageHeapAllocator(imageHeap, startOffset);
         for (ChunkedImageHeapPartition partition : getPartitions()) {
             partition.layout(allocator);
         }
-        return populateInfoObjects();
+        return populateInfoObjects(imageHeap.countDynamicHubs());
     }
 
-    private ImageHeapLayoutInfo populateInfoObjects() {
+    private ImageHeapLayoutInfo populateInfoObjects(int dynamicHubCount) {
         // Determine writable start boundary from chunks: a chunk that contains writable objects
         // must also have a writable card table
         long writableBegin = getWritablePrimitive().getStartOffset();
@@ -97,18 +97,16 @@ public class ChunkedImageHeapLayouter extends AbstractImageHeapLayouter<ChunkedI
         heapInfo.initialize(getReadOnlyPrimitive().firstObject, getReadOnlyPrimitive().lastObject, getReadOnlyReference().firstObject, getReadOnlyReference().lastObject,
                         getReadOnlyRelocatable().firstObject, getReadOnlyRelocatable().lastObject, getWritablePrimitive().firstObject, getWritablePrimitive().lastObject,
                         getWritableReference().firstObject, getWritableReference().lastObject, getWritableHuge().firstObject, getWritableHuge().lastObject,
-                        getReadOnlyHuge().firstObject, getReadOnlyHuge().lastObject, writableBegin, firstWritableUnalignedChunk);
+                        getReadOnlyHuge().firstObject, getReadOnlyHuge().lastObject, writableBegin, firstWritableUnalignedChunk, dynamicHubCount);
 
-        long writableEnd = getWritableHuge().getStartOffset() + getWritableHuge().getSize();
-        long writableSize = writableEnd - writableBegin;
-        long imageHeapSize = getReadOnlyHuge().getStartOffset() + getReadOnlyHuge().getSize();
-        return new ImageHeapLayoutInfo(writableBegin, writableSize, getReadOnlyRelocatable().getStartOffset(), getReadOnlyRelocatable().getSize(), imageHeapSize);
+        return createLayoutInfo(startOffset, writableBegin);
     }
 
     @Override
-    public void writeMetadata(ByteBuffer imageHeapBytes) {
-        ImageHeapChunkWriter writer = SubstrateUtil.HOSTED ? new HostedImageHeapChunkWriter(imageHeapBytes)
-                        : new RuntimeImageHeapChunkWriter(imageHeapBytes);
+    public void writeMetadata(ByteBuffer imageHeapBytes, long imageHeapOffsetInBuffer) {
+        long layoutToBufferOffsetAddend = imageHeapOffsetInBuffer - startOffset;
+        ImageHeapChunkWriter writer = SubstrateUtil.HOSTED ? new HostedImageHeapChunkWriter(imageHeapBytes, layoutToBufferOffsetAddend)
+                        : new RuntimeImageHeapChunkWriter(imageHeapBytes, layoutToBufferOffsetAddend);
         writeHeaders(writer, allocator.getAlignedChunks());
         writeHeaders(writer, allocator.getUnalignedChunks());
     }
@@ -131,16 +129,12 @@ public class ChunkedImageHeapLayouter extends AbstractImageHeapLayouter<ChunkedI
             int chunkPosition = NumUtil.safeToInt(current.getBegin());
             if (current instanceof AlignedChunk) {
                 AlignedChunk aligned = (AlignedChunk) current;
-                assert aligned.isFinished();
                 writer.initializeAlignedChunk(chunkPosition, current.getTopOffset(), current.getEndOffset(), offsetToPrevious, offsetToNext);
-                for (ImageHeapObject obj : aligned.getObjects()) {
-                    long offsetInChunk = obj.getOffsetInPartition() + obj.getPartition().getStartOffset() - chunkPosition;
-                    long endOffsetInChunk = offsetInChunk + obj.getSize();
-                    writer.insertIntoAlignedChunkFirstObjectTable(chunkPosition, offsetInChunk, endOffsetInChunk);
-                }
+                writer.enableRememberedSetForAlignedChunk(chunkPosition, aligned.getObjects());
             } else {
                 assert current instanceof UnalignedChunk;
                 writer.initializeUnalignedChunk(chunkPosition, current.getTopOffset(), current.getEndOffset(), offsetToPrevious, offsetToNext);
+                writer.enableRememberedSetForUnalignedChunk(chunkPosition);
             }
         }
     }

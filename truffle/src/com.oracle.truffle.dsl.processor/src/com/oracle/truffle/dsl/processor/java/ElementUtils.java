@@ -191,6 +191,16 @@ public class ElementUtils {
         return null;
     }
 
+    public static ExecutableElement findExecutableElement(DeclaredType type, String name, int argumentCount) {
+        List<? extends ExecutableElement> elements = ElementFilter.methodsIn(type.asElement().getEnclosedElements());
+        for (ExecutableElement executableElement : elements) {
+            if (executableElement.getParameters().size() == argumentCount && executableElement.getSimpleName().toString().equals(name) && !isDeprecated(executableElement)) {
+                return executableElement;
+            }
+        }
+        return null;
+    }
+
     public static VariableElement findVariableElement(DeclaredType type, String name) {
         List<? extends VariableElement> elements = ElementFilter.fieldsIn(type.asElement().getEnclosedElements());
         for (VariableElement variableElement : elements) {
@@ -1336,6 +1346,14 @@ public class ElementUtils {
         }
 
         return false;
+    }
+
+    public static void setFinal(Set<Modifier> modifiers, boolean enabled) {
+        if (enabled) {
+            modifiers.add(Modifier.FINAL);
+        } else {
+            modifiers.remove(Modifier.FINAL);
+        }
     }
 
     public static void setVisibility(Set<Modifier> modifiers, Modifier visibility) {

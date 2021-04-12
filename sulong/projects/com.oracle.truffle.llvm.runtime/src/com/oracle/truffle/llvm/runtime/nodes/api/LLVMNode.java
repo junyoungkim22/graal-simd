@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates.
  *
  * All rights reserved.
  *
@@ -35,6 +35,7 @@ import java.util.Arrays;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleLanguage.ContextReference;
@@ -48,7 +49,7 @@ import com.oracle.truffle.llvm.runtime.LLVMFunctionDescriptor;
 import com.oracle.truffle.llvm.runtime.LLVMLanguage;
 import com.oracle.truffle.llvm.runtime.datalayout.DataLayout;
 import com.oracle.truffle.llvm.runtime.debug.scope.LLVMSourceLocation;
-import com.oracle.truffle.llvm.runtime.memory.LLVMNativeMemory;
+import com.oracle.truffle.llvm.runtime.memory.LLVMHandleMemoryBase;
 import com.oracle.truffle.llvm.runtime.pointer.LLVMNativePointer;
 
 @TypeSystemReference(LLVMTypes.class)
@@ -109,7 +110,7 @@ public abstract class LLVMNode extends Node {
                 assert !(datalayoutNode instanceof RootNode) : "root node must not have a parent";
                 datalayoutNode = datalayoutNode.getParent();
             } else {
-                return LLVMLanguage.getContext().getLibsulongDataLayout();
+                return LLVMLanguage.getLanguage().getDefaultDataLayout();
             }
         }
         return ((LLVMHasDatalayoutNode) datalayoutNode).getDatalayout();
@@ -194,7 +195,7 @@ public abstract class LLVMNode extends Node {
         if (CompilerDirectives.inCompiledCode() && language.getNoDerefHandleAssumption().isValid()) {
             return false;
         }
-        return LLVMNativeMemory.isDerefHandleMemory(addr);
+        return LLVMHandleMemoryBase.isDerefHandleMemory(addr);
     }
 
     /**
@@ -217,5 +218,9 @@ public abstract class LLVMNode extends Node {
             current = current.getParent();
         }
         return null;
+    }
+
+    public static Assumption singleContextAssumption() {
+        return LLVMLanguage.getLanguage().singleContextAssumption;
     }
 }

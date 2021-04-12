@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,8 +40,13 @@
  */
 package org.graalvm.polyglot;
 
+import org.graalvm.polyglot.HostAccess.TargetMappingPrecedence;
+import org.graalvm.polyglot.impl.AbstractPolyglotImpl.AbstractValueImpl;
+import org.graalvm.polyglot.proxy.Proxy;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteOrder;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -50,14 +55,14 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.zone.ZoneRules;
+import java.util.ConcurrentModificationException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-
-import org.graalvm.polyglot.impl.AbstractPolyglotImpl.AbstractValueImpl;
-import org.graalvm.polyglot.proxy.Proxy;
 
 /**
  * Represents a polyglot value that can be accessed using a set of language agnostic operations.
@@ -92,6 +97,8 @@ import org.graalvm.polyglot.proxy.Proxy;
  * <li>{@link #isMetaObject() Meta-Object}: This value represents a metaobject. Access metaobject
  * operations using {@link #getMetaSimpleName()}, {@link #getMetaQualifiedName()} and
  * {@link #isMetaInstance(Object)}.
+ * <li>{@link #isIterator() Iterator}: This value represents an iterator. The iterator can be
+ * iterated using {@link #hasIteratorNextElement()} and {@link #getIteratorNextElement()}.
  * </ul>
  * In addition any value may have one or more of the following traits:
  * <ul>
@@ -105,6 +112,12 @@ import org.graalvm.polyglot.proxy.Proxy;
  * for executable elements are functions, methods, closures or promises.
  * <li>{@link #canInstantiate() Instantiable}: This value can be {@link #newInstance(Object...)
  * instantiated}. For example, Java classes are instantiable.
+ * <li>{@link #hasBufferElements() Buffer Elements}: This value may contain buffer elements. The
+ * buffer indices always start with <code>0</code>, also if the language uses a different style.
+ * <li>{@link #hasIterator() Iterable}: This value {@link #getIterator() provides} an
+ * {@link #isIterator() iterator} which can be used to {@link #getIteratorNextElement() iterate}
+ * value elements. For example, Guest language arrays are iterable.
+ * <li>{@link #hasHashEntries()} Hash Entries}: This value represents a map.
  * </ul>
  * <p>
  * In addition to the language agnostic types, the language specific type can be accessed using
@@ -281,6 +294,7 @@ public final class Value {
      * described in {@link Context#asValue(Object)}.
      *
      * @throws ArrayIndexOutOfBoundsException if the array index does not exist.
+     * @throws ClassCastException if the provided value type is not allowed to be written.
      * @throws UnsupportedOperationException if the value does not have any
      *             {@link #hasArrayElements() array elements} or if the index exists but is not
      *             modifiable.
@@ -320,6 +334,369 @@ public final class Value {
     public long getArraySize() {
         return impl.getArraySize(receiver);
     }
+
+    // region Buffer Methods
+
+    /**
+     * Returns {@code true} if the receiver may have buffer elements. In this case, the buffer size
+     * can be queried using {@link #getBufferSize()} and elements can be read using
+     * {@link #readBufferByte(long)}, {@link #readBufferShort(ByteOrder, long)},
+     * {@link #readBufferInt(ByteOrder, long)}, {@link #readBufferLong(ByteOrder, long)},
+     * {@link #readBufferFloat(ByteOrder, long)} and {@link #readBufferDouble(ByteOrder, long)}. If
+     * {@link #isBufferWritable()} returns {@code true}, then buffer elements can also be written
+     * using {@link #writeBufferByte(long, byte)},
+     * {@link #writeBufferShort(ByteOrder, long, short)},
+     * {@link #writeBufferInt(ByteOrder, long, int)},
+     * {@link #writeBufferLong(ByteOrder, long, long)},
+     * {@link #writeBufferFloat(ByteOrder, long, float)} and
+     * {@link #writeBufferDouble(ByteOrder, long, double)}.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @see #hasBufferElements()
+     * @since 21.1
+     */
+    public boolean hasBufferElements() {
+        return impl.hasBufferElements(receiver);
+    }
+
+    /**
+     * Returns true if the receiver object is a modifiable buffer. In this case, elements can be
+     * written using {@link #writeBufferByte(long, byte)},
+     * {@link #writeBufferShort(ByteOrder, long, short)},
+     * {@link #writeBufferInt(ByteOrder, long, int)},
+     * {@link #writeBufferLong(ByteOrder, long, long)},
+     * {@link #writeBufferFloat(ByteOrder, long, float)} and
+     * {@link #writeBufferDouble(ByteOrder, long, double)}.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @since 21.1
+     */
+    public boolean isBufferWritable() throws UnsupportedOperationException {
+        return impl.isBufferWritable(receiver);
+    }
+
+    /**
+     * Returns the buffer size in bytes for values with buffer elements.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @since 21.1
+     */
+    public long getBufferSize() throws UnsupportedOperationException {
+        return impl.getBufferSize(receiver);
+    }
+
+    /**
+     * Reads the byte at the given byte offset from the start of the buffer.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param byteOffset the offset, in bytes, from the start of the buffer at which the byte will
+     *            be read.
+     * @return the byte at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= </code>{@link #getBufferSize()}.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public byte readBufferByte(long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferByte(receiver, byteOffset);
+    }
+
+    /**
+     * Writes the given byte at the given byte offset from the start of the buffer.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param byteOffset the offset, in bytes, from the start of the buffer at which the byte will
+     *            be written.
+     * @param value the byte value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= </code>{@link #getBufferSize()}.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferByte(long byteOffset, byte value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferByte(receiver, byteOffset, value);
+    }
+
+    /**
+     * Reads the short at the given byte offset from the start of the buffer in the given byte
+     * order.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param order the order in which to read the individual bytes of the short.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the short
+     *            will be read.
+     * @return the short at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 1</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public short readBufferShort(ByteOrder order, long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferShort(receiver, order, byteOffset);
+    }
+
+    /**
+     * Writes the given short in the given byte order at the given byte offset from the start of the
+     * buffer.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param order the order in which to write the individual bytes of the short.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the short
+     *            will be written.
+     * @param value the short value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 1</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferShort(ByteOrder order, long byteOffset, short value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferShort(receiver, order, byteOffset, value);
+    }
+
+    /**
+     * Reads the int at the given byte offset from the start of the buffer in the given byte order.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param order the order in which to read the individual bytes of the int.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the int will
+     *            be read.
+     * @return the int at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 3</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public int readBufferInt(ByteOrder order, long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferInt(receiver, order, byteOffset);
+    }
+
+    /**
+     * Writes the given int in the given byte order at the given byte offset from the start of the
+     * buffer.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param order the order in which to write the individual bytes of the int.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the int will
+     *            be written.
+     * @param value the int value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 3</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferInt(ByteOrder order, long byteOffset, int value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferInt(receiver, order, byteOffset, value);
+    }
+
+    /**
+     * Reads the long at the given byte offset from the start of the buffer in the given byte order.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param order the order in which to read the individual bytes of the long.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the int will
+     *            be read.
+     * @return the int at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 7</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public long readBufferLong(ByteOrder order, long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferLong(receiver, order, byteOffset);
+    }
+
+    /**
+     * Writes the given long in the given byte order at the given byte offset from the start of the
+     * buffer.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param order the order in which to write the individual bytes of the long.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the int will
+     *            be written.
+     * @param value the int value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 7</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferLong(ByteOrder order, long byteOffset, long value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferLong(receiver, order, byteOffset, value);
+    }
+
+    /**
+     * Reads the float at the given byte offset from the start of the buffer in the given byte
+     * order.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param order the order in which to read the individual bytes of the float.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the float
+     *            will be read.
+     * @return the float at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 3</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public float readBufferFloat(ByteOrder order, long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferFloat(receiver, order, byteOffset);
+    }
+
+    /**
+     * Writes the given float in the given byte order at the given byte offset from the start of the
+     * buffer.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param order the order in which to read the individual bytes of the float.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the float
+     *            will be written.
+     * @param value the float value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 3</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferFloat(ByteOrder order, long byteOffset, float value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferFloat(receiver, order, byteOffset, value);
+    }
+
+    /**
+     * Reads the double at the given byte offset from the start of the buffer in the given byte
+     * order.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     * <p>
+     * Invoking this method does not cause any observable side-effects.
+     *
+     * @param order the order in which to write the individual bytes of the double.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the double
+     *            will be read.
+     * @return the double at the given byte offset from the start of the buffer.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 7</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public double readBufferDouble(ByteOrder order, long byteOffset) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        return impl.readBufferDouble(receiver, order, byteOffset);
+    }
+
+    /**
+     * Writes the given double in the given byte order at the given byte offset from the start of
+     * the buffer.
+     * <p>
+     * Unaligned accesses are supported.
+     * <p>
+     * The access is <em>not</em> guaranteed to be atomic. Therefore, this method is <em>not</em>
+     * thread-safe.
+     *
+     * @param order the order in which to write the individual bytes of the double.
+     * @param byteOffset the offset, in bytes, from the start of the buffer from which the double
+     *            will be written.
+     * @param value the double value to be written.
+     * @throws IndexOutOfBoundsException if and only if
+     *             <code>byteOffset < 0 || byteOffset >= {@link #getBufferSize()} - 7</code>.
+     * @throws UnsupportedOperationException if the value does not have {@link #hasBufferElements
+     *             buffer elements} or is not {@link #isBufferWritable() modifiable}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void writeBufferDouble(ByteOrder order, long byteOffset, double value) throws UnsupportedOperationException, IndexOutOfBoundsException {
+        impl.writeBufferDouble(receiver, order, byteOffset, value);
+    }
+
+    // endregion
 
     /**
      * Returns <code>true</code> if this value generally supports containing members. To check
@@ -395,6 +772,7 @@ public final class Value {
      * @throws UnsupportedOperationException if the value does not have any {@link #hasMembers()
      *             members}, the key does not exist and new members cannot be added, or the existing
      *             member is not modifiable.
+     * @throws IllegalArgumentException if the provided value type is not allowed to be written.
      * @throws PolyglotException if a guest language error occurred during execution.
      * @throws NullPointerException if the identifier is null.
      * @since 19.0
@@ -871,9 +1249,10 @@ public final class Value {
      * <ul>
      * <li>Custom
      * {@link HostAccess.Builder#targetTypeMapping(Class, Class, java.util.function.Predicate, Function)
-     * target type mappings} specified in the {@link HostAccess} configuration when the context is
-     * constructed. Custom target type mappings may override all the type mappings below. This
-     * allows for customization if one of the below type mappings is not suitable.
+     * target type mappings} specified in the {@link HostAccess} configuration with precedence
+     * {@link TargetMappingPrecedence#HIGHEST} or {@link TargetMappingPrecedence#HIGH}. These custom
+     * target type mappings may override all the type mappings below. This allows for customization
+     * if one of the below type mappings is not suitable.
      * <li><code>{@link Value}.class</code> is always supported and returns this instance.
      * <li>If the value represents a {@link #isHostObject() host object} then all classes
      * implemented or extended by the host object can be used as target type.
@@ -907,13 +1286,19 @@ public final class Value {
      * <li><code>{@link PolyglotException}.class</code> is supported if the value is an
      * {@link #isException() exception object}.</li>
      * <li>Any Java type in the type hierarchy of a {@link #isHostObject() host object}.
+     * <li>Custom
+     * {@link HostAccess.Builder#targetTypeMapping(Class, Class, java.util.function.Predicate, Function)
+     * target type mappings} specified in the {@link HostAccess} configuration with precedence
+     * {@link TargetMappingPrecedence#LOW}.
      * <li><code>{@link Object}.class</code> is always supported. See section Object mapping rules.
-     * <li><code>{@link Map}.class</code> is supported if the value has {@link #hasMembers()
-     * members} or {@link #hasArrayElements() array elements}. The returned map can be safely cast
-     * to Map<Object, Object>. The key type in such a case is either {@link String} or {@link Long}.
-     * It is recommended to use {@link #as(TypeLiteral) type literals} to specify the expected
-     * collection component types. With type literals the value type can be restricted, for example
-     * to <code>Map<String, String></code>. If the raw <code>{@link Map}.class</code> or an Object
+     * <li><code>{@link Map}.class</code> is supported if the value has {@link #hasHashEntries()}
+     * hash entries}, {@link #hasMembers() members} or {@link #hasArrayElements() array elements}.
+     * The returned map can be safely cast to Map<Object, Object>. For value with
+     * {@link #hasMembers() members} the key type is {@link String}. For value with
+     * {@link #hasArrayElements() array elements} the key type is {@link Long}. It is recommended to
+     * use {@link #as(TypeLiteral) type literals} to specify the expected collection component
+     * types. With type literals the value type can be restricted, for example to
+     * <code>Map<String, String></code>. If the raw <code>{@link Map}.class</code> or an Object
      * component type is used, then the return types of the the list are subject to Object target
      * type mapping rules recursively.
      * <li><code>{@link List}.class</code> is supported if the value has {@link #hasArrayElements()
@@ -929,6 +1314,21 @@ public final class Value {
      * returned array will not be reflected in the original value. Since conversion to a Java array
      * might be an expensive operation it is recommended to use the `List` or `Collection` target
      * type if possible.
+     * <li><code>{@link Iterable}.class</code> is supported if the value has an
+     * {@link #hasIterator() iterator}. The returned iterable can be safely cast to
+     * <code>Iterable&lt;Object&gt;</code>. It is recommended to use {@link #as(TypeLiteral) type
+     * literals} to specify the expected component type. With type literals the value type can be
+     * restricted to any supported target type, for example to <code>Iterable&lt;Integer&gt;</code>.
+     * <li><code>{@link Iterator}.class</code> is supported if the value is an {@link #isIterator()
+     * iterator} The returned iterator can be safely cast to <code>Iterator&lt;Object&gt;</code>. It
+     * is recommended to use {@link #as(TypeLiteral) type literals} to specify the expected
+     * component type. With type literals the value type can be restricted to any supported target
+     * type, for example to <code>Iterator&lt;Integer&gt;</code>. If the raw
+     * <code>{@link Iterator}.class</code> or an Object component type is used, then the return
+     * types of the the iterator are recursively subject to Object target type mapping rules. The
+     * returned iterator's {@link Iterator#next() next} method may throw a
+     * {@link ConcurrentModificationException} when an underlying iterable has changed or
+     * {@link UnsupportedOperationException} when the iterator's current element is not readable.
      * <li>Any {@link FunctionalInterface functional} interface if the value can be
      * {@link #canExecute() executed} or {@link #canInstantiate() instantiated} and the interface
      * type is {@link HostAccess implementable}. Note that {@link FunctionalInterface} are
@@ -942,10 +1342,21 @@ public final class Value {
      * <li>Any interface if the value {@link #hasMembers() has members} and the interface type is
      * {@link HostAccess.Implementable implementable}. Each interface method maps to one
      * {@link #getMember(String) member} of the value. Whenever a method of the interface is
-     * executed a member with the method or field name must exist otherwise a
-     * {@link UnsupportedOperationException} is thrown when the method is executed. A member If one
-     * of the parameters cannot be mapped to the target type a {@link ClassCastException} or a
-     * {@link NullPointerException} is thrown.
+     * executed a member with the method or field name must exist otherwise an
+     * {@link UnsupportedOperationException} is thrown when the method is executed. If one of the
+     * parameters or the return value cannot be mapped to the target type a
+     * {@link ClassCastException} or a {@link NullPointerException} is thrown.
+     * <li>JVM only: Any abstract class with an accessible default constructor if the value
+     * {@link #hasMembers() has members} and the class is {@link HostAccess.Implementable
+     * implementable}. Each interface method maps to one {@link #getMember(String) member} of the
+     * value. Whenever an abstract method of the class is executed a member with the method or field
+     * name must exist otherwise an {@link UnsupportedOperationException} is thrown when the method
+     * is executed. If one of the parameters or the return value cannot be mapped to the target type
+     * a {@link ClassCastException} or a {@link NullPointerException} is thrown.
+     * <li>Custom
+     * {@link HostAccess.Builder#targetTypeMapping(Class, Class, java.util.function.Predicate, Function)
+     * target type mappings} specified in the {@link HostAccess} configuration with precedence
+     * {@link TargetMappingPrecedence#LOWEST}.
      * </ul>
      * A {@link ClassCastException} is thrown for other unsupported target types.
      * <p>
@@ -956,16 +1367,20 @@ public final class Value {
      * assert context.eval("js", "undefined").as(Object.class) == null;
      * assert context.eval("js", "'foobar'").as(String.class).equals("foobar");
      * assert context.eval("js", "42").as(Integer.class) == 42;
-     * assert context.eval("js", "{foo:'bar'}").as(Map.class).get("foo").equals("bar");
+     * assert context.eval("js", "({foo:'bar'})").as(Map.class).get("foo").equals("bar");
      * assert context.eval("js", "[42]").as(List.class).get(0).equals(42);
      * assert ((Map&lt;String, Object>)context.eval("js", "[{foo:'bar'}]").as(List.class).get(0)).get("foo").equals("bar");
      *
      * &#64;FunctionalInterface interface IntFunction { int foo(int value); }
-     * assert context.eval("js", "(function(a){a})").as(IntFunction.class).foo(42) == 42;
+     * assert context.eval("js", "(function(a){return a})").as(IntFunction.class).foo(42).asInt() == 42;
      *
      * &#64;FunctionalInterface interface StringListFunction { int foo(List&lt;String&gt; value); }
-     * assert context.eval("js", "(function(a){a.length})").as(StringListFunction.class)
-     *                                                     .foo(new String[]{"42"}) == 1;
+     * assert context.eval("js", "(function(a){return a.length})")
+     *               .as(StringListFunction.class).foo(new String[]{"42"}).asInt() == 1;
+     *
+     * public abstract class AbstractClass { public AbstractClass() {} int foo(int value); }
+     * assert context.eval("js", "({foo: function(a){return a}})")
+     *               .as(AbstractClass.class).foo(42).asInt() == 42;
      * </pre>
      *
      * <h3>Object target type mapping</h3>
@@ -987,6 +1402,11 @@ public final class Value {
      * any Number subclass including {@link BigInteger} or {@link BigDecimal}. It is recommended to
      * cast to {@link Number} and then convert to a Java primitive like with
      * {@link Number#longValue()}.
+     * <li>If the value has {@link #hasHashEntries() hash entries} then the result value will
+     * implement {@link Map}. The {@link Map#size() size} of the returned {@link Map} is equal to
+     * the {@link #getHashSize() hash entries count}. The returned value may also implement
+     * {@link Function} if the value can be {@link #canExecute() executed} or
+     * {@link #canInstantiate() instantiated}.
      * <li>If the value {@link #hasMembers() has members} then the result value will implement
      * {@link Map}. If this value {@link #hasMembers() has members} then all members are accessible
      * using {@link String} keys. The {@link Map#size() size} of the returned {@link Map} is equal
@@ -998,6 +1418,12 @@ public final class Value {
      * element of the value maps to one list element. The size of the returned list maps to the
      * array size of the value. The returned value may also implement {@link Function} if the value
      * can be {@link #canExecute() executed} or {@link #canInstantiate() instantiated}.
+     * <li>If the value has an {@link #hasIterator()} iterator} then the result value will implement
+     * {@link Iterable}. The returned value may also implement {@link Function} if the value can be
+     * {@link #canExecute() executed} or {@link #canInstantiate() instantiated}.
+     * <li>If the value is an {@link #isIterator()} iterator} then the result value will implement
+     * {@link Iterator}. The returned value may also implement {@link Function} if the value can be
+     * {@link #canExecute() executed} or {@link #canInstantiate() instantiated}.
      * <li>If the value can be {@link #canExecute() executed} or {@link #canInstantiate()
      * instantiated} then the result value implements {@link Function Function}. By default the
      * argument of the function will be used as single argument to the function when executed. If a
@@ -1353,6 +1779,243 @@ public final class Value {
     @Override
     public int hashCode() {
         return impl.hashCodeImpl(receiver);
+    }
+
+    /**
+     * Returns <code>true</code> if this polyglot value provides an iterator. In this case the
+     * iterator can be obtained using {@link #getIterator()}.
+     *
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @see #getIterator()
+     * @since 21.1
+     */
+    public boolean hasIterator() {
+        return impl.hasIterator(receiver);
+    }
+
+    /**
+     * Creates a new iterator that allows read each element of a sequence.
+     *
+     * @throws UnsupportedOperationException if the value does not provide {@link #hasIterator()
+     *             iterator}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @see #hasIterator()
+     * @since 21.1
+     */
+    public Value getIterator() {
+        return impl.getIterator(receiver);
+    }
+
+    /**
+     * Returns <code>true</code> if the value represents an iterator object. In this case the
+     * iterator elements can be accessed using {@link #getIteratorNextElement()}.
+     *
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @see #hasIteratorNextElement()
+     * @see #getIteratorNextElement()
+     * @since 21.1
+     */
+    public boolean isIterator() {
+        return impl.isIterator(receiver);
+    }
+
+    /**
+     * Returns <code>true</code> if the value represents an iterator which has more elements, else
+     * {@code false}. Multiple calls to the {@link #hasIteratorNextElement()} might lead to
+     * different results if the underlying data structure is modified.
+     *
+     * @throws UnsupportedOperationException if the value is not an {@link #isIterator() iterator}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @see #isIterator()
+     * @see #getIteratorNextElement()
+     * @since 21.1
+     */
+    public boolean hasIteratorNextElement() {
+        return impl.hasIteratorNextElement(receiver);
+    }
+
+    /**
+     * Returns the next element in the iteration. When the underlying data structure is modified the
+     * {@link #getIteratorNextElement()} may throw the {@link NoSuchElementException} despite the
+     * {@link #hasIteratorNextElement()} returned {@code true}, or it may throw a language error.
+     *
+     * @throws UnsupportedOperationException if the value is not an {@link #isIterator() iterator}
+     *             or when the underlying iterable element exists but is not readable.
+     * @throws NoSuchElementException if the iteration has no more elements. Even if the
+     *             {@link NoSuchElementException} was thrown it might not be thrown again by a next
+     *             call of the {@link #getIteratorNextElement()} due to a modification of an
+     *             underlying iterable.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @see #isIterator()
+     * @see #hasIteratorNextElement()
+     * @since 21.1
+     */
+    public Value getIteratorNextElement() {
+        return impl.getIteratorNextElement(receiver);
+    }
+
+    /**
+     * Returns <code>true</code> if this polyglot value represents a map. In this case map entries
+     * can be accessed using {@link #getHashValue(Object)},
+     * {@link #getHashValueOrDefault(Object, Object)}, {@link #putHashEntry(Object, Object)},
+     * {@link #removeHashEntry(Object)}, {@link #getHashEntriesIterator()} and the map size can be
+     * queried using {@link #getHashSize()}.
+     *
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public boolean hasHashEntries() {
+        return impl.hasHashEntries(receiver);
+    }
+
+    /**
+     * Returns the number of map entries for values with hash entries.
+     *
+     * @throws UnsupportedOperationException if the value does not have any
+     *             {@link #hasHashEntries()} hash entries}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public long getHashSize() throws UnsupportedOperationException {
+        return impl.getHashSize(receiver);
+    }
+
+    /**
+     * Returns {@code true} if mapping for the specified key exists. If the value has no
+     * {@link #hasHashEntries() hash entries} then {@link #hasHashEntry(Object)} returns
+     * {@code false}. The key is subject to polyglot value mapping rules as described in
+     * {@link Context#asValue(Object)}.
+     *
+     * @throws IllegalStateException if the context is already {@link Context#close() closed}.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public boolean hasHashEntry(Object key) {
+        return impl.hasHashEntry(receiver, key);
+    }
+
+    /**
+     * Returns the value for the specified key or {@code null} if the mapping for the specified key
+     * does not exist. The key is subject to polyglot value mapping rules as described in
+     * {@link Context#asValue(Object)}.
+     *
+     * @throws UnsupportedOperationException if the value has no {@link #hasHashEntries() hash
+     *             entries} or the mapping for given key exists but is not readable.
+     * @throws IllegalStateException if the context is already {@link Context#close() closed}.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public Value getHashValue(Object key) throws UnsupportedOperationException {
+        return impl.getHashValue(receiver, key);
+    }
+
+    /**
+     * Returns the value for the specified key or the default value if the mapping for the specified
+     * key does not exist or is not readable. The key and the default value are subject to polyglot
+     * value mapping rules as described in {@link Context#asValue(Object)}.
+     *
+     * @throws UnsupportedOperationException if the value has no {@link #hasHashEntries() hash
+     *             entries} at all.
+     * @throws IllegalStateException if the context is already {@link Context#close() closed}.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public Value getHashValueOrDefault(Object key, Object defaultValue) throws UnsupportedOperationException {
+        return impl.getHashValueOrDefault(receiver, key, defaultValue);
+    }
+
+    /**
+     * Associates the specified value with the specified key. Both key and value are subject to
+     * polyglot value mapping rules as described in {@link Context#asValue(Object)}.
+     *
+     * @throws UnsupportedOperationException if the value does not have any {@link #hasHashEntries()
+     *             hash entries}, the mapping for specified key does not exist and new members
+     *             cannot be added, or the existing mapping for specified key is not modifiable.
+     * @throws IllegalArgumentException if the provided key type or value type is not allowed to be
+     *             written.
+     * @throws IllegalStateException if the context is already {@link Context#close() closed}.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public void putHashEntry(Object key, Object value) throws IllegalArgumentException, UnsupportedOperationException {
+        impl.putHashEntry(receiver, key, value);
+    }
+
+    /**
+     * Removes the mapping for a given key. Returns {@code true} if the mapping was successfully
+     * removed, {@code false} if mapping for a given key does not exist. The key is subject to
+     * polyglot value mapping rules as described in {@link Context#asValue(Object)}.
+     *
+     * @throws UnsupportedOperationException if the value does not have any {@link #hasHashEntries()
+     *             hash entries} or if mapping for specified key {@link #hasHashEntry(Object)
+     *             exists} but cannot be removed.
+     * @throws IllegalStateException if the context is already {@link Context#close() closed}.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     * @since 21.1
+     */
+    public boolean removeHashEntry(Object key) throws UnsupportedOperationException {
+        return impl.removeHashEntry(receiver, key);
+    }
+
+    /**
+     * Creates a new hash entries iterator that allows read each map entry. The return value is
+     * always an {@link #isIterator() iterator} of {@link #hasArrayElements() array elements}. The
+     * first array element is a key, the second array element is an associated value. Even if the
+     * value array element is {@link #setArrayElement(long, Object) modifiable} writing to array may
+     * not update the mapping, always use {@link #putHashEntry(Object, Object)} to update the
+     * mapping.
+     *
+     * @throws UnsupportedOperationException if the value does not have any {@link #hasHashEntries()
+     *             hash entries}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @since 21.1
+     */
+    public Value getHashEntriesIterator() throws UnsupportedOperationException {
+        return impl.getHashEntriesIterator(receiver);
+    }
+
+    /**
+     * Creates a new hash keys iterator that allows read each map key. The return value is always an
+     * {@link #isIterator() iterator}.
+     *
+     * @throws UnsupportedOperationException if the value does not have any {@link #hasHashEntries()
+     *             hash entries}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @since 21.1
+     */
+    public Value getHashKeysIterator() throws UnsupportedOperationException {
+        return impl.getHashKeysIterator(receiver);
+    }
+
+    /**
+     * Creates a new hash values iterator that allows read each map value. The return value is
+     * always an {@link #isIterator() iterator}.
+     *
+     * @throws UnsupportedOperationException if the value does not have any {@link #hasHashEntries()
+     *             hash entries}.
+     * @throws IllegalStateException if the context is already closed.
+     * @throws PolyglotException if a guest language error occurred during execution.
+     *
+     * @since 21.1
+     */
+    public Value getHashValuesIterator() throws UnsupportedOperationException {
+        return impl.getHashValuesIterator(receiver);
     }
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.ReplaceObserver;
 import com.oracle.truffle.api.Truffle;
+import com.oracle.truffle.api.TruffleSafepoint;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.FrameSlot;
 import com.oracle.truffle.api.frame.FrameSlotKind;
@@ -75,6 +76,7 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
 
     private final int osrThreshold;
     private final boolean firstTierBackedgeCounts;
+    private volatile boolean compilationDisabled;
 
     private OptimizedOSRLoopNode(RepeatingNode repeatableNode, int osrThreshold, boolean firstTierBackedgeCounts) {
         Objects.requireNonNull(repeatableNode);
@@ -129,17 +131,21 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
                 baseLoopCount = 0;
             }
         } else if (GraalCompilerDirectives.inFirstTier()) {
-            int iterationsCompleted = 0;
+            long iterationsCompleted = 0;
             Object status;
-            while (repeatableNode.shouldContinue((status = repeatableNode.executeRepeatingWithValue(frame)))) {
-                iterationsCompleted++;
-                if (CompilerDirectives.inInterpreter()) {
-                    // compiled method got invalidated. We might need OSR again.
-                    return execute(frame);
+            try {
+                while (repeatableNode.shouldContinue((status = repeatableNode.executeRepeatingWithValue(frame)))) {
+                    iterationsCompleted++;
+                    if (CompilerDirectives.inInterpreter()) {
+                        // compiled method got invalidated. We might need OSR again.
+                        return execute(frame);
+                    }
+                    TruffleSafepoint.poll(this);
                 }
-            }
-            if (firstTierBackedgeCounts && iterationsCompleted > 1) {
-                reportParentLoopCount(iterationsCompleted);
+            } finally {
+                if (firstTierBackedgeCounts && iterationsCompleted > 1) {
+                    reportParentLoopCount(toIntOrMaxInt(iterationsCompleted));
+                }
             }
             return status;
         } else {
@@ -149,28 +155,34 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
                     // compiled method got invalidated. We might need OSR again.
                     return execute(frame);
                 }
+                TruffleSafepoint.poll(this);
             }
             return status;
         }
     }
 
+    static int toIntOrMaxInt(long i) {
+        return i > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) i;
+    }
+
     private Object profilingLoop(VirtualFrame frame) {
-        int iterations = 0;
+        long iterations = 0;
         try {
             Object status;
             while (repeatableNode.shouldContinue(status = repeatableNode.executeRepeatingWithValue(frame))) {
                 // the baseLoopCount might be updated from a child loop during an iteration.
-                if (++iterations + baseLoopCount > osrThreshold) {
+                if (++iterations + baseLoopCount > osrThreshold && !compilationDisabled) {
                     compileLoop(frame);
                     // The status returned here is CONTINUE_LOOP_STATUS.
                     return status;
                 }
+                TruffleSafepoint.poll(this);
             }
             // The status returned here is different than CONTINUE_LOOP_STATUS.
             return status;
         } finally {
-            baseLoopCount += iterations;
-            reportParentLoopCount(iterations);
+            baseLoopCount = toIntOrMaxInt(baseLoopCount + iterations);
+            reportParentLoopCount(toIntOrMaxInt(iterations));
         }
     }
 
@@ -183,6 +195,9 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
 
     final void reportChildLoopCount(int iterations) {
         baseLoopCount += iterations;
+        if (baseLoopCount < 0) {
+            baseLoopCount = Integer.MAX_VALUE;
+        }
     }
 
     /**
@@ -200,7 +215,7 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
     }
 
     private Object compilingLoop(VirtualFrame frame) {
-        int iterations = 0;
+        long iterations = 0;
         try {
             Object status;
             do {
@@ -212,17 +227,16 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
                     if (target.isValid()) {
                         return callOSR(target, frame);
                     }
-                    invalidateOSRTarget(this, "OSR compilation failed or cancelled");
+                    invalidateOSRTarget("OSR compilation failed or cancelled");
                     return repeatableNode.initialLoopStatus();
                 }
-
                 iterations++;
-
+                TruffleSafepoint.poll(this);
             } while (repeatableNode.shouldContinue(status = repeatableNode.executeRepeatingWithValue(frame)));
             return status;
         } finally {
-            baseLoopCount += iterations;
-            reportParentLoopCount(iterations);
+            baseLoopCount = toIntOrMaxInt(baseLoopCount + iterations);
+            reportParentLoopCount(toIntOrMaxInt(iterations));
         }
     }
 
@@ -232,7 +246,7 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
             return status;
         } else {
             if (!target.isValid()) {
-                invalidateOSRTarget(this, "OSR compilation got invalidated");
+                invalidateOSRTarget("OSR compilation got invalidated");
             }
             return status;
         }
@@ -242,6 +256,9 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
         atomic(new Runnable() {
             @Override
             public void run() {
+                if (compilationDisabled) {
+                    return;
+                }
                 /*
                  * Compilations need to run atomically as they may be scheduled by multiple threads
                  * at the same time. This strategy lets the first thread win. Later threads will not
@@ -264,6 +281,14 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
             speculationLog = GraalTruffleRuntime.getRuntime().createSpeculationLog();
         }
         OptimizedCallTarget osrTarget = GraalTruffleRuntime.getRuntime().createOSRCallTarget(createRootNodeImpl(root, frame.getClass()));
+        if (!osrTarget.acceptForCompilation()) {
+            /*
+             * Don't retry if the target will not be accepted anyway.
+             */
+            compilationDisabled = true;
+            return null;
+        }
+
         osrTarget.setSpeculationLog(speculationLog);
         osrTarget.compile(true);
         return osrTarget;
@@ -281,21 +306,29 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
             public void run() {
                 OptimizedCallTarget target = compiledOSRLoop;
                 if (target != null) {
-                    compiledOSRLoop = null;
+                    resetCompiledOSRLoop();
                     target.nodeReplaced(oldNode, newNode, reason);
                 }
             }
         });
     }
 
-    private void invalidateOSRTarget(Object source, CharSequence reason) {
+    private void resetCompiledOSRLoop() {
+        OptimizedCallTarget target = this.compiledOSRLoop;
+        if (target != null && target.isCompilationFailed()) {
+            this.compilationDisabled = true;
+        }
+        this.compiledOSRLoop = null;
+    }
+
+    private void invalidateOSRTarget(CharSequence reason) {
         atomic(new Runnable() {
             @Override
             public void run() {
                 OptimizedCallTarget target = compiledOSRLoop;
                 if (target != null) {
-                    compiledOSRLoop = null;
-                    target.invalidate(source, reason);
+                    resetCompiledOSRLoop();
+                    target.invalidate(reason);
                 }
             }
         });
@@ -307,11 +340,12 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
      */
     public static LoopNode create(RepeatingNode repeat) {
         // No RootNode accessible here, as repeat is not adopted.
-        OptionValues engineOptions = GraalTVMCI.getEngineData(null).engineOptions;
+        EngineData engine = GraalTVMCI.getEngineData(null);
+        OptionValues engineOptions = engine.engineOptions;
 
         // using static methods with LoopNode return type ensures
         // that only one loop node implementation gets loaded.
-        if (TruffleRuntimeOptions.getPolyglotOptionValue(engineOptions, PolyglotCompilerOptions.OSR)) {
+        if (engine.compilation && engineOptions.get(PolyglotCompilerOptions.OSR)) {
             return createDefault(repeat, engineOptions);
         } else {
             return OptimizedLoopNode.create(repeat);
@@ -320,8 +354,8 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
 
     private static LoopNode createDefault(RepeatingNode repeatableNode, OptionValues options) {
         return new OptimizedDefaultOSRLoopNode(repeatableNode,
-                        TruffleRuntimeOptions.getPolyglotOptionValue(options, PolyglotCompilerOptions.OSRCompilationThreshold),
-                        TruffleRuntimeOptions.getPolyglotOptionValue(options, PolyglotCompilerOptions.FirstTierBackedgeCounts));
+                        options.get(PolyglotCompilerOptions.OSRCompilationThreshold),
+                        options.get(PolyglotCompilerOptions.FirstTierBackedgeCounts));
     }
 
     /**
@@ -447,6 +481,7 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
                 if (CompilerDirectives.inInterpreter()) {
                     return loopNode.repeatableNode.initialLoopStatus();
                 }
+                TruffleSafepoint.poll(this);
             }
             return status;
         }
@@ -528,6 +563,7 @@ public abstract class OptimizedOSRLoopNode extends LoopNode implements ReplaceOb
                     if (CompilerDirectives.inInterpreter()) {
                         return loopNode.repeatableNode.initialLoopStatus();
                     }
+                    TruffleSafepoint.poll(this);
                 }
                 return status;
             } finally {

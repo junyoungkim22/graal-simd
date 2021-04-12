@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,19 +52,38 @@ public class VarHandlePartialEvaluationTest extends PartialEvaluationTest {
      * Tests partial evaluation of a byte array view {@link VarHandle#get}.
      */
     @Test
-    public void byteArrayHandle() {
-        AbstractTestNode result = new VarHandleTestNode(true);
-        testCommon(result, "byteArrayHandle", ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42).array(), 0);
+    public void byteArrayHandleGet() {
+        byte[] array = ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42).array();
+        testCommon(new VarHandleTestNode(true, false), "byteArrayHandleGetInt", array, 0);
+    }
+
+    /**
+     * Tests partial evaluation of a byte array view {@link VarHandle#set}.
+     */
+    @Test
+    public void byteArrayHandleSet() {
+        byte[] array = ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42).array();
+        testCommon(new VarHandleTestNode(true, true), "byteArrayHandleSetInt", array, 0, 42);
     }
 
     /**
      * Tests partial evaluation of a byte buffer view {@link VarHandle#get}.
      */
     @Test
-    public void byteBufferHandle() {
-        Assume.assumeTrue("GR-23778", JavaVersionUtil.JAVA_SPEC <= 11);
-        AbstractTestNode result = new VarHandleTestNode(false);
-        testCommon(result, "byteBufferHandle", ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42), 0);
+    public void byteBufferHandleGet() {
+        Assume.assumeTrue(JavaVersionUtil.JAVA_SPEC <= 11 || JavaVersionUtil.JAVA_SPEC >= 16);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42);
+        testCommon(new VarHandleTestNode(false, false), "byteBufferHandleGetInt", byteBuffer, 0);
+    }
+
+    /**
+     * Tests partial evaluation of a byte buffer view {@link VarHandle#set}.
+     */
+    @Test
+    public void byteBufferHandleSet() {
+        Assume.assumeTrue(JavaVersionUtil.JAVA_SPEC <= 11 || JavaVersionUtil.JAVA_SPEC >= 16);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(42).order(ByteOrder.nativeOrder()).putInt(0, 42);
+        testCommon(new VarHandleTestNode(false, true), "byteArrayHandleSetInt", byteBuffer, 0, 42);
     }
 
     private void testCommon(AbstractTestNode testNode, String testName, Object... args) {
@@ -77,19 +96,31 @@ public class VarHandlePartialEvaluationTest extends PartialEvaluationTest {
 
     static final class VarHandleTestNode extends AbstractTestNode {
         private final boolean isArray;
+        private final boolean set;
 
-        VarHandleTestNode(boolean isArray) {
+        VarHandleTestNode(boolean isArray, boolean set) {
             this.isArray = isArray;
+            this.set = set;
         }
 
         @Override
         public int execute(VirtualFrame frame) {
             Object buf = frame.getArguments()[0];
             int idx = (int) frame.getArguments()[1];
-            if (isArray) {
-                return (int) byteArrayHandle.get((byte[]) buf, idx);
+            if (set) {
+                int val = (int) frame.getArguments()[2];
+                if (isArray) {
+                    byteArrayHandle.set((byte[]) buf, idx, val);
+                } else {
+                    byteBufferHandle.set((ByteBuffer) buf, idx, val);
+                }
+                return val;
             } else {
-                return (int) byteBufferHandle.get((ByteBuffer) buf, idx);
+                if (isArray) {
+                    return (int) byteArrayHandle.get((byte[]) buf, idx);
+                } else {
+                    return (int) byteBufferHandle.get((ByteBuffer) buf, idx);
+                }
             }
         }
     }

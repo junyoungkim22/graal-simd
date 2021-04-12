@@ -40,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
@@ -50,6 +51,8 @@ import org.graalvm.nativeimage.Platforms;
 import com.oracle.graal.pointsto.BigBang;
 import com.oracle.graal.pointsto.infrastructure.SubstitutionProcessor;
 import com.oracle.graal.pointsto.meta.AnalysisField;
+import com.oracle.graal.pointsto.meta.AnalysisType;
+import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.annotate.Alias;
 import com.oracle.svm.core.annotate.AnnotateOriginal;
 import com.oracle.svm.core.annotate.Delete;
@@ -105,7 +108,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
 
         deleteAnnotations = new HashMap<>();
         typeSubstitutions = new HashMap<>();
-        methodSubstitutions = new HashMap<>();
+        methodSubstitutions = new ConcurrentHashMap<>();
         polymorphicMethodSubstitutions = new HashMap<>();
         fieldSubstitutions = new HashMap<>();
     }
@@ -199,8 +202,20 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                 }
 
                 PolymorphicSignatureWrapperMethod wrapperMethod = new PolymorphicSignatureWrapperMethod(substitutionBaseMethod, method);
-                SubstitutionMethod substitutionMethod = new SubstitutionMethod(method, wrapperMethod);
-                register(methodSubstitutions, wrapperMethod, method, substitutionMethod);
+                SubstitutionMethod substitutionMethod = new SubstitutionMethod(method, wrapperMethod, false, true);
+                synchronized (methodSubstitutions) {
+                    /*
+                     * It may happen that, during analysis, two threads are trying to register the
+                     * same variant of a polymorphic method simultaneously. This check ensures that
+                     * when this happens, the variant is registered only once and both lookups
+                     * return the same substitution.
+                     */
+                    ResolvedJavaMethod currentSubstitution = methodSubstitutions.get(method);
+                    if (currentSubstitution != null) {
+                        return currentSubstitution;
+                    }
+                    register(methodSubstitutions, wrapperMethod, method, substitutionMethod);
+                }
 
                 return substitutionMethod;
             }
@@ -230,6 +245,8 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
 
                 switch (cvField.getRecomputeValueKind()) {
                     case FieldOffset:
+                        AnalysisType targetFieldDeclaringType = bb.getMetaAccess().lookupJavaType(cvField.getTargetField().getDeclaringClass());
+                        targetFieldDeclaringType.registerAsReachable();
                         AnalysisField targetField = bb.getMetaAccess().lookupJavaField(cvField.getTargetField());
                         targetField.registerAsAccessed();
                         targetField.registerAsUnsafeAccessed(bb.getUniverse());
@@ -351,9 +368,19 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         if (original == null) {
             /* Optional target that is not present, so nothing to do. */
         } else if (deleteAnnotation != null) {
+            if (SubstrateOptions.VerifyNamingConventions.getValue()) {
+                int modifiers = original.getModifiers();
+                if (Modifier.isProtected(modifiers) || Modifier.isPublic(modifiers)) {
+                    String format = "Detected a public or protected method annotated with @Delete: %s. " +
+                                    "Such usages of @Delete are not permited since these methods can be called " +
+                                    "from third party code and can lead to unsupported features. " +
+                                    "Instead the method should be replaced with a @Substitute method and `throw VMError.unsupportedFeature()`.";
+                    throw UserError.abort(format, annotatedMethod);
+                }
+            }
             registerAsDeleted(annotated, original, deleteAnnotation);
         } else if (substituteAnnotation != null) {
-            SubstitutionMethod substitution = new SubstitutionMethod(original, annotated);
+            SubstitutionMethod substitution = new SubstitutionMethod(original, annotated, false, true);
             if (substituteAnnotation.polymorphicSignature()) {
                 register(polymorphicMethodSubstitutions, annotated, original, substitution);
             }
@@ -551,7 +578,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         ResolvedJavaType annotated = metaAccess.lookupJavaType(annotatedClass);
 
         for (int i = 0; i < ARRAY_DIMENSIONS; i++) {
-            ResolvedJavaType substitution = new SubstitutionType(original, annotated);
+            ResolvedJavaType substitution = new SubstitutionType(original, annotated, true);
             register(typeSubstitutions, annotated, original, substitution);
 
             original = original.getArrayClass();
@@ -588,6 +615,15 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
     }
 
     private void handleAnnotatedMethodInSubstitutionClass(Executable annotatedMethod, Class<?> originalClass) {
+        if (annotatedMethod.isSynthetic()) {
+            /*
+             * Synthetic bridge methods for co-variant return types inherit the annotations. We
+             * ignore such methods here, and handleOriginalMethodInSubstitutionClass keeps the
+             * original implementation of such methods.
+             */
+            return;
+        }
+
         Substitute substituteAnnotation = lookupAnnotation(annotatedMethod, Substitute.class);
         KeepOriginal keepOriginalAnnotation = lookupAnnotation(annotatedMethod, KeepOriginal.class);
 
@@ -604,7 +640,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         if (original == null) {
             /* Optional target that is not present, so nothing to do. */
         } else if (substituteAnnotation != null) {
-            SubstitutionMethod substitution = new SubstitutionMethod(original, annotated, true);
+            SubstitutionMethod substitution = new SubstitutionMethod(original, annotated, true, true);
             if (substituteAnnotation.polymorphicSignature()) {
                 register(polymorphicMethodSubstitutions, annotated, original, substitution);
             }
@@ -628,7 +664,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         if (original == null) {
             /* Optional target that is not present, so nothing to do. */
         } else {
-            register(fieldSubstitutions, annotated, original, new SubstitutionField(original, annotated));
+            register(fieldSubstitutions, annotated, original, new SubstitutionField(original, annotated, true));
         }
     }
 
@@ -643,6 +679,9 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                  * methods as if they were annotated with @KeepOriginal. If the method/field that
                  * the synthetic method is forwarding to is not available, an error message for that
                  * method/field will be produced anyway.
+                 * 
+                 * This also treats synthetic bridge methods as @KeepOriginal, so that
+                 * handleAnnotatedMethodInSubstitutionClass does not need to handle them.
                  */
                 register(methodSubstitutions, null, method, method);
             } else {
@@ -692,12 +731,10 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             }
 
         } catch (NoSuchMethodException ex) {
-            throw UserError.abort("could not find target method: " + annotatedMethod);
-        } catch (NoClassDefFoundError error) {
-            String message = String.format("can not find %s.%s, %s can not be loaded, due to %s not being available in the classpath. " +
-                            "Are you missing a dependency in your classpath?",
+            throw UserError.abort("Could not find target method: %s", annotatedMethod);
+        } catch (LinkageError error) {
+            throw UserError.abort("Cannot find %s.%s, %s can not be loaded, due to %s not being available in the classpath. Are you missing a dependency in your classpath?",
                             originalClass.getName(), originalName, originalClass.getName(), error.getMessage());
-            throw UserError.abort(message);
         }
     }
 
@@ -751,7 +788,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             try {
                 onlyWithProvider = ReflectionUtil.newInstance(onlyWithClass);
             } catch (ReflectionUtilError ex) {
-                throw UserError.abort(ex.getCause(), "Class specified as onlyWith for " + annotatedElement + " cannot be loaded or instantiated: " + onlyWithClass.getTypeName());
+                throw UserError.abort(ex.getCause(), "Class specified as onlyWith for %s cannot be loaded or instantiated: %s", annotatedElement, onlyWithClass.getTypeName());
             }
 
             boolean onlyWithResult;
@@ -762,8 +799,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                 Predicate<Class<?>> onlyWithPredicate = (Predicate<Class<?>>) onlyWithProvider;
                 onlyWithResult = onlyWithPredicate.test(originalClass);
             } else {
-                throw UserError.abort("Class specified as onlyWith for " + annotatedElement + " does not implement " +
-                                BooleanSupplier.class.getSimpleName() + " or " + Predicate.class.getSimpleName());
+                throw UserError.abort("Class specified as onlyWith for %s does not implement %s or %s", annotatedElement, BooleanSupplier.class.getSimpleName(), Predicate.class.getSimpleName());
             }
 
             if (!onlyWithResult) {
@@ -813,7 +849,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                 guarantee(recomputeAnnotation.declClassName().isEmpty(), "Both class and class name specified");
                 targetClass = recomputeAnnotation.declClass();
             } else if (!recomputeAnnotation.declClassName().isEmpty()) {
-                targetClass = imageClassLoader.findClassByName(recomputeAnnotation.declClassName());
+                targetClass = imageClassLoader.findClassOrFail(recomputeAnnotation.declClassName());
             }
         }
         return new ComputedValueField(original, annotated, kind, targetClass, targetName, isFinal);
@@ -860,7 +896,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             try {
                 className = ReflectionUtil.newInstance(target.classNameProvider()).apply(target);
             } catch (ReflectionUtilError ex) {
-                throw UserError.abort(ex.getCause(), "Cannot instantiate classNameProvider: " + target.classNameProvider().getTypeName() + ". The class must have a parameterless constructor.");
+                throw UserError.abort(ex.getCause(), "Cannot instantiate classNameProvider: %s. The class must have a parameterless constructor.", target.classNameProvider().getTypeName());
             }
         } else {
             guarantee(!target.className().isEmpty(), "Neither class, className, nor classNameProvider specified for substitution");
@@ -872,7 +908,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             try {
                 onlyWithProvider = ReflectionUtil.newInstance(onlyWithClass);
             } catch (ReflectionUtilError ex) {
-                throw UserError.abort(ex.getCause(), "Class specified as onlyWith for " + annotatedBaseClass.getTypeName() + " cannot be loaded or instantiated: " + onlyWithClass.getTypeName());
+                throw UserError.abort(ex.getCause(), "Class specified as onlyWith for %s cannot be loaded or instantiated: %s", annotatedBaseClass.getTypeName(), onlyWithClass.getTypeName());
             }
 
             boolean onlyWithResult;
@@ -883,8 +919,8 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                 Predicate<String> onlyWithPredicate = (Predicate<String>) onlyWithProvider;
                 onlyWithResult = onlyWithPredicate.test(className);
             } else {
-                throw UserError.abort("Class specified as onlyWith for " + annotatedBaseClass.getTypeName() + " does not implement " +
-                                BooleanSupplier.class.getSimpleName() + " or " + Predicate.class.getSimpleName());
+                throw UserError.abort("Class specified as onlyWith for %s does not implement %s or %s", annotatedBaseClass.getTypeName(),
+                                BooleanSupplier.class.getSimpleName(), Predicate.class.getSimpleName());
             }
 
             if (!onlyWithResult) {
@@ -892,18 +928,18 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             }
         }
 
-        Class<?> holder = imageClassLoader.findClassByName(className, false);
+        Class<?> holder = imageClassLoader.findClass(className).get();
         if (holder == null) {
-            throw UserError.abort("substitution target for " + annotatedBaseClass.getName() +
-                            " is not loaded. Use field `onlyWith` in the `TargetClass` annotation to make substitution only active when needed.");
+            throw UserError.abort("Substitution target for %s is not loaded. Use field `onlyWith` in the `TargetClass` annotation to make substitution only active when needed.",
+                            annotatedBaseClass.getName());
         }
         if (target.innerClass().length > 0) {
             for (String innerClass : target.innerClass()) {
                 Class<?> prevHolder = holder;
                 holder = findInnerClass(prevHolder, innerClass);
                 if (holder == null) {
-                    throw UserError.abort("substitution target for " + annotatedBaseClass.getName() + " is invalid as inner class " + innerClass + " in " + prevHolder.getName() +
-                                    " can not be found. Make sure that the inner class is present.");
+                    throw UserError.abort("Substitution target for %s is invalid as inner class %s in %s can not be found. Make sure that the inner class is present.",
+                                    annotatedBaseClass.getName(), innerClass, prevHolder.getName());
                 }
             }
         }

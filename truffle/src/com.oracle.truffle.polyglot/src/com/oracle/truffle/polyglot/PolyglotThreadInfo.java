@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -42,9 +42,9 @@ package com.oracle.truffle.polyglot;
 
 import java.util.LinkedList;
 
-import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.SpecializationStatistics;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.utilities.TruffleWeakReference;
 
 final class PolyglotThreadInfo {
@@ -59,12 +59,13 @@ final class PolyglotThreadInfo {
      * Only modify if Thread.currentThread() == thread.get().
      */
     private volatile int enteredCount;
-    final LinkedList<Object> explicitContextStack = new LinkedList<>();
+    final LinkedList<PolyglotContextImpl> explicitContextStack = new LinkedList<>();
     volatile boolean cancelled;
     private Object originalContextClassLoader = NULL_CLASS_LOADER;
     private ClassLoaderEntry prevContextClassLoader;
     private SpecializationStatisticsEntry executionStatisticsEntry;
 
+    private boolean safepointActive; // only accessed from current thread
     private volatile Object[] contextThreadLocals;
 
     PolyglotThreadInfo(PolyglotContextImpl context, Thread thread) {
@@ -74,6 +75,16 @@ final class PolyglotThreadInfo {
 
     Thread getThread() {
         return thread.get();
+    }
+
+    boolean isSafepointActive() {
+        assert isCurrent();
+        return safepointActive;
+    }
+
+    public void setSafepointActive(boolean safepointActive) {
+        assert isCurrent();
+        this.safepointActive = safepointActive;
     }
 
     public Object[] getContextThreadLocals() {
@@ -90,33 +101,42 @@ final class PolyglotThreadInfo {
         return getThread() == Thread.currentThread();
     }
 
-    /*
-     * Volatile increment is safe if only one thread does it.
+    /**
+     * Not to be used directly. Use
+     * {@link PolyglotEngineImpl#enter(PolyglotContextImpl, Node, boolean)} instead.
      */
     @SuppressFBWarnings("VO_VOLATILE_INCREMENT")
-    void enter(PolyglotEngineImpl engine, PolyglotContextImpl profiledContext) {
-        assert Thread.currentThread() == getThread();
+    PolyglotContextImpl enterInternal() {
+        PolyglotContextImpl prev = PolyglotContextImpl.getSingleContextState().getContextThreadLocal().setReturnParent(context);
         enteredCount++;
+        return prev;
+    }
 
-        if (CompilerDirectives.injectBranchProbability(CompilerDirectives.SLOWPATH_PROBABILITY, profiledContext.closed)) {
-            /*
-             * This event should be very rare. The context was closed between the volatile read of
-             * the cached thread info read and the entered count increment. Maybe we should change
-             * this to an assumption check to speed it up.
-             */
-            CompilerDirectives.transferToInterpreter();
-            enteredCount--;
-            profiledContext.checkClosed();
-            assert false : "checkClosed must throw";
-        }
+    int getEnteredCount() {
+        assert Thread.currentThread() == thread.get();
+        return enteredCount;
+    }
 
+    /**
+     * Not to be used directly. Use
+     * {@link PolyglotEngineImpl#leave(PolyglotContextImpl, PolyglotContextImpl)} instead.
+     */
+    @SuppressFBWarnings("VO_VOLATILE_INCREMENT")
+    void leaveInternal(PolyglotContextImpl prev) {
+        enteredCount--;
+        PolyglotContextImpl.getSingleContextState().getContextThreadLocal().set(prev);
+    }
+
+    void notifyEnter(PolyglotEngineImpl engine, PolyglotContextImpl profiledContext) {
         if (!engine.customHostClassLoader.isValid()) {
             setContextClassLoader();
         }
-        if (engine.specializationStatistics != null) {
-            engine.specializationStatistics.enter();
-        }
+
         EngineAccessor.INSTRUMENT.notifyEnter(engine.instrumentationHandler, profiledContext.creatorTruffleContext);
+
+        if (engine.specializationStatistics != null) {
+            enterStatistics(engine.specializationStatistics);
+        }
     }
 
     boolean isPolyglotThread(PolyglotContextImpl c) {
@@ -130,20 +150,20 @@ final class PolyglotThreadInfo {
      * Volatile decrement is safe if only one thread does it.
      */
     @SuppressFBWarnings("VO_VOLATILE_INCREMENT")
-    void leave(PolyglotEngineImpl engine, PolyglotContextImpl profiledContext) {
-        assert Thread.currentThread() == getThread();
+    void notifyLeave(PolyglotEngineImpl engine, PolyglotContextImpl profiledContext) {
         /*
          * Notify might be false if the context was closed already on a second thread.
          */
-        EngineAccessor.INSTRUMENT.notifyLeave(engine.instrumentationHandler, profiledContext.creatorTruffleContext);
-        enteredCount--;
-        if (!engine.customHostClassLoader.isValid()) {
-            restoreContextClassLoader();
+        try {
+            EngineAccessor.INSTRUMENT.notifyLeave(engine.instrumentationHandler, profiledContext.creatorTruffleContext);
+        } finally {
+            if (!engine.customHostClassLoader.isValid()) {
+                restoreContextClassLoader();
+            }
+            if (engine.specializationStatistics != null) {
+                leaveStatistics(engine.specializationStatistics);
+            }
         }
-        if (engine.specializationStatistics != null) {
-            leaveStatistics(engine.specializationStatistics);
-        }
-
     }
 
     @TruffleBoundary
@@ -163,10 +183,6 @@ final class PolyglotThreadInfo {
             statistics.leave(entry.statistics);
             this.executionStatisticsEntry = entry.next;
         }
-    }
-
-    boolean isLastActive() {
-        return getThread() != null && enteredCount == 1 && !cancelled;
     }
 
     boolean isActiveNotCancelled() {

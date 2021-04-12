@@ -26,10 +26,15 @@ package com.oracle.svm.core.genscavenge;
 
 import org.graalvm.compiler.word.Word;
 import org.graalvm.word.Pointer;
+import org.graalvm.word.UnsignedWord;
+import org.graalvm.word.WordFactory;
 
 import com.oracle.svm.core.annotate.Uninterruptible;
 import com.oracle.svm.core.annotate.UnknownObjectField;
 import com.oracle.svm.core.annotate.UnknownPrimitiveField;
+import com.oracle.svm.core.genscavenge.AlignedHeapChunk.AlignedHeader;
+import com.oracle.svm.core.genscavenge.UnalignedHeapChunk.UnalignedHeader;
+import com.oracle.svm.core.snippets.KnownIntrinsics;
 
 /**
  * Information on the multiple partitions that make up the image heap, which don't necessarily form
@@ -66,6 +71,8 @@ public final class ImageHeapInfo {
     @UnknownPrimitiveField public long offsetOfFirstAlignedChunkWithRememberedSet;
     @UnknownPrimitiveField public long offsetOfFirstUnalignedChunkWithRememberedSet;
 
+    @UnknownPrimitiveField public int dynamicHubCount;
+
     public ImageHeapInfo() {
     }
 
@@ -73,7 +80,8 @@ public final class ImageHeapInfo {
     public void initialize(Object firstReadOnlyPrimitiveObject, Object lastReadOnlyPrimitiveObject, Object firstReadOnlyReferenceObject, Object lastReadOnlyReferenceObject,
                     Object firstReadOnlyRelocatableObject, Object lastReadOnlyRelocatableObject, Object firstWritablePrimitiveObject, Object lastWritablePrimitiveObject,
                     Object firstWritableReferenceObject, Object lastWritableReferenceObject, Object firstWritableHugeObject, Object lastWritableHugeObject,
-                    Object firstReadOnlyHugeObject, Object lastReadOnlyHugeObject, long offsetOfFirstAlignedChunkWithRememberedSet, long offsetOfFirstUnalignedChunkWithRememberedSet) {
+                    Object firstReadOnlyHugeObject, Object lastReadOnlyHugeObject, long offsetOfFirstAlignedChunkWithRememberedSet, long offsetOfFirstUnalignedChunkWithRememberedSet,
+                    int dynamicHubCount) {
         assert offsetOfFirstAlignedChunkWithRememberedSet == NO_CHUNK || offsetOfFirstAlignedChunkWithRememberedSet >= 0;
         assert offsetOfFirstUnalignedChunkWithRememberedSet == NO_CHUNK || offsetOfFirstUnalignedChunkWithRememberedSet >= 0;
 
@@ -93,6 +101,7 @@ public final class ImageHeapInfo {
         this.lastReadOnlyHugeObject = lastReadOnlyHugeObject;
         this.offsetOfFirstAlignedChunkWithRememberedSet = offsetOfFirstAlignedChunkWithRememberedSet;
         this.offsetOfFirstUnalignedChunkWithRememberedSet = offsetOfFirstUnalignedChunkWithRememberedSet;
+        this.dynamicHubCount = dynamicHubCount;
 
         // Compute boundaries for checks considering partitions can be empty (first == last == null)
         Object firstReadOnlyObject = (firstReadOnlyPrimitiveObject != null) ? firstReadOnlyPrimitiveObject
@@ -172,22 +181,23 @@ public final class ImageHeapInfo {
         } else {
             result = objectPointer.aboveOrEqual(Word.objectToUntrackedPointer(firstObject)) && objectPointer.belowOrEqual(Word.objectToUntrackedPointer(lastObject));
         }
-        assert result == isInImageHeapSlow(objectPointer);
         return result;
     }
 
-    @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
-    public boolean isInImageHeapSlow(Pointer objectPointer) {
-        boolean result = false;
-        if (objectPointer.isNonNull()) {
-            result |= isInReadOnlyPrimitivePartition(objectPointer);
-            result |= isInReadOnlyReferencePartition(objectPointer);
-            result |= isInReadOnlyRelocatablePartition(objectPointer);
-            result |= isInWritablePrimitivePartition(objectPointer);
-            result |= isInWritableReferencePartition(objectPointer);
-            result |= isInWritableHugePartition(objectPointer);
-            result |= isInReadOnlyHugePartition(objectPointer);
+    public AlignedHeader getFirstAlignedImageHeapChunk() {
+        return asImageHeapChunk(offsetOfFirstAlignedChunkWithRememberedSet);
+    }
+
+    public UnalignedHeader getFirstUnalignedImageHeapChunk() {
+        return asImageHeapChunk(offsetOfFirstUnalignedChunkWithRememberedSet);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends HeapChunk.Header<T>> T asImageHeapChunk(long offsetInImageHeap) {
+        if (offsetInImageHeap < 0) {
+            return (T) WordFactory.nullPointer();
         }
-        return result;
+        UnsignedWord offset = WordFactory.unsigned(offsetInImageHeap);
+        return (T) KnownIntrinsics.heapBase().add(offset);
     }
 }

@@ -26,6 +26,7 @@ package com.oracle.svm.core.thread;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.oracle.svm.core.snippets.KnownIntrinsics;
 import org.graalvm.compiler.api.replacements.Fold;
 import org.graalvm.compiler.core.common.spi.ForeignCallDescriptor;
 import org.graalvm.compiler.graph.Node.ConstantNodeParameter;
@@ -41,6 +42,7 @@ import org.graalvm.nativeimage.Platform;
 import org.graalvm.nativeimage.Platforms;
 import org.graalvm.nativeimage.hosted.Feature;
 import org.graalvm.word.LocationIdentity;
+import org.graalvm.word.UnsignedWord;
 import org.graalvm.word.WordFactory;
 
 import com.oracle.svm.core.SubstrateOptions;
@@ -50,6 +52,7 @@ import com.oracle.svm.core.annotate.NeverInline;
 import com.oracle.svm.core.annotate.RestrictHeapAccess;
 import com.oracle.svm.core.annotate.StubCallingConvention;
 import com.oracle.svm.core.annotate.Uninterruptible;
+import com.oracle.svm.core.graal.nodes.KillMemoryNode;
 import com.oracle.svm.core.heap.Heap;
 import com.oracle.svm.core.jdk.UninterruptibleUtils;
 import com.oracle.svm.core.log.Log;
@@ -62,8 +65,10 @@ import com.oracle.svm.core.option.RuntimeOptionKey;
 import com.oracle.svm.core.snippets.SnippetRuntime;
 import com.oracle.svm.core.snippets.SnippetRuntime.SubstrateForeignCallDescriptor;
 import com.oracle.svm.core.snippets.SubstrateForeignCallTarget;
+import com.oracle.svm.core.thread.VMThreads.ActionOnExitSafepointSupport;
 import com.oracle.svm.core.thread.VMThreads.ActionOnTransitionToJavaSupport;
 import com.oracle.svm.core.thread.VMThreads.StatusSupport;
+import com.oracle.svm.core.threadlocal.FastThreadLocal;
 import com.oracle.svm.core.threadlocal.FastThreadLocalFactory;
 import com.oracle.svm.core.threadlocal.FastThreadLocalInt;
 import com.oracle.svm.core.threadlocal.VMThreadLocalInfos;
@@ -125,7 +130,17 @@ import com.oracle.svm.core.util.VMError;
  * @see SafepointCheckNode
  */
 public final class Safepoint {
-
+    /*
+     * For all safepoint-related foreign calls, we must assume that they kill the TLAB locations
+     * because those might be modified by a GC or when a recurring callback allocates. We ignore all
+     * other writes as those need to use volatile semantics anyways (to prevent normal race
+     * conditions). For performance reasons, we need to assume that recurring callbacks don't do any
+     * writes that interfere in a problematic way with the read elimination that is done for the
+     * application (otherwise, we would have to kill all memory locations at every safepoint).
+     *
+     * NOTE: all locations that are killed by safepoint slowpath calls must also be killed by most
+     * other foreign calls because the call target may contain a safepoint.
+     */
     public static final SubstrateForeignCallDescriptor ENTER_SLOW_PATH_SAFEPOINT_CHECK = SnippetRuntime.findForeignCall(Safepoint.class, "enterSlowPathSafepointCheck", true);
     private static final SubstrateForeignCallDescriptor ENTER_SLOW_PATH_TRANSITION_FROM_NATIVE_TO_NEW_STATUS = SnippetRuntime.findForeignCall(Safepoint.class,
                     "enterSlowPathTransitionFromNativeToNewStatus", true);
@@ -222,8 +237,11 @@ public final class Safepoint {
     private static void slowPathRunJavaStateActions() {
         ThreadingSupportImpl.onSafepointCheckSlowpath();
         if (ActionOnTransitionToJavaSupport.isActionPending()) {
-            assert ActionOnTransitionToJavaSupport.isSynchronizeCode() : "Unexpected action pending.";
-            CodeSynchronizationNode.synchronizeCode();
+            if (ActionOnTransitionToJavaSupport.isSynchronizeCode()) {
+                CodeSynchronizationNode.synchronizeCode();
+            } else {
+                assert false : "Unexpected action pending.";
+            }
             ActionOnTransitionToJavaSupport.clearActions();
         }
     }
@@ -310,7 +328,7 @@ public final class Safepoint {
      * value.</li>
      * </ul>
      */
-    static final FastThreadLocalInt safepointRequested = FastThreadLocalFactory.createInt();
+    static final FastThreadLocalInt safepointRequested = FastThreadLocalFactory.createInt().setMaxOffset(FastThreadLocal.FIRST_CACHE_LINE);
 
     /** The value to reset a thread's {@link #safepointRequested} value to after a safepoint. */
     static final int THREAD_REQUEST_RESET = Integer.MAX_VALUE;
@@ -390,6 +408,22 @@ public final class Safepoint {
              */
             VMError.shouldNotReachHere(ex);
         }
+
+        exitSlowPathCheck();
+    }
+
+    @Uninterruptible(reason = "Must not contain safepoint checks")
+    private static void exitSlowPathCheck() {
+        if (ActionOnExitSafepointSupport.isActionPending()) {
+            // LLVM Backend do not support `FarReturnNode`,
+            // we explicit specify Loom JDK here.
+            if (JavaContinuations.useLoom() && ActionOnExitSafepointSupport.getSwitchStack()) {
+                ActionOnExitSafepointSupport.clearActions();
+                KnownIntrinsics.farReturn(0, ActionOnExitSafepointSupport.getSwitchStackSP(), ActionOnExitSafepointSupport.getSwitchStackIP(), false);
+            } else {
+                assert false : "Unexpected action pending.";
+            }
+        }
     }
 
     /**
@@ -401,10 +435,16 @@ public final class Safepoint {
         // Transition from C to Java, checking for safepoint.
         StatusSupport.assertStatusNativeOrSafepoint();
         int newStatus = StatusSupport.STATUS_IN_JAVA;
-        boolean needSlowPath = ThreadingSupportImpl.needsNativeToJavaSlowpath() || !StatusSupport.compareAndSetNativeToNewStatus(newStatus);
-        if (BranchProbabilityNode.probability(BranchProbabilityNode.VERY_SLOW_PATH_PROBABILITY, needSlowPath)) {
+        if (BranchProbabilityNode.probability(BranchProbabilityNode.VERY_SLOW_PATH_PROBABILITY, ThreadingSupportImpl.needsNativeToJavaSlowpath()) ||
+                        BranchProbabilityNode.probability(BranchProbabilityNode.VERY_SLOW_PATH_PROBABILITY, !StatusSupport.compareAndSetNativeToNewStatus(newStatus))) {
             callSlowPathNativeToNewStatus(Safepoint.ENTER_SLOW_PATH_TRANSITION_FROM_NATIVE_TO_NEW_STATUS, newStatus);
         }
+
+        /*
+         * Kill all memory locations to ensure that no floating reads are scheduled before the
+         * thread is properly transitioned into the Java state.
+         */
+        KillMemoryNode.killMemory(LocationIdentity.ANY_LOCATION);
     }
 
     @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
@@ -516,6 +556,7 @@ public final class Safepoint {
         }
 
         private volatile int safepointState;
+        private volatile UnsignedWord safepointId;
 
         /** The thread requesting a safepoint. */
         private volatile IsolateThread requestingThread;
@@ -552,6 +593,7 @@ public final class Safepoint {
             waitForSafepoints(reason);
             Statistics.setFrozenNanos();
             safepointState = AT_SAFEPOINT;
+            safepointId = safepointId.add(1);
             return lock;
         }
 
@@ -798,6 +840,11 @@ public final class Safepoint {
         @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
         protected boolean isFrozen() {
             return safepointState == AT_SAFEPOINT;
+        }
+
+        @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
+        protected UnsignedWord getSafepointId() {
+            return safepointId;
         }
 
         /** A sample method to execute in a VMOperation. */
