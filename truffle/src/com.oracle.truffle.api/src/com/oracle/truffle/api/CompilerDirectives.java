@@ -573,11 +573,9 @@ public final class CompilerDirectives {
         }
     }
 
-    public static void simdDoubleFmadd(int inputOffset, double multVal, double[] input, double[] output) {
-        for(int i = inputOffset; i < inputOffset + 8; i++) {
+    public static void simdDoubleFmadd(int length, double multVal, double[] input, double[] output) {
+        for(int i = 0; i < length; i++) {
             output[i] += input[i] * multVal;
         }
     }
-
-
 }

@@ -326,7 +326,7 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
     }
 
     @SuppressWarnings("unused")
-    default void emitSimdDoubleFmadd(Value inputOffset, Value multVal, Value input, Value output) {
+    default void emitSimdDoubleFmadd(Value length, Value multVal, Value input, Value output) {
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
 }

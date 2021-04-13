@@ -755,7 +755,7 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public void emitSimdDoubleFmadd(Value inputOffset, Value multVal, Value input, Value output) {
-        append(new SimdDoubleFmaddOp(this, asAllocatable(inputOffset), multVal, input, output));
+    public void emitSimdDoubleFmadd(Value length, Value multVal, Value input, Value output) {
+        append(new SimdDoubleFmaddOp(this, asAllocatable(length), multVal, input, output));
     }
 }

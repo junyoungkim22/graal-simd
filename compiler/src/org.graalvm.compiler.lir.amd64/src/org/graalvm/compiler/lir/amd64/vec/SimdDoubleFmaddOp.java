@@ -31,55 +31,61 @@ public final class SimdDoubleFmaddOp extends AMD64LIRInstruction {
     private final int DOUBLE_ARRAY_BASE_OFFSET;
     private final Scale DOUBLE_ARRAY_INDEX_SCALE;
 
-    @Use({REG}) private Value inputOffsetValue;
+    @Use({REG}) private Value lengthValue;
     @Use({REG}) private Value multValValue;
     @Alive({REG}) private Value inputPtr;
     @Alive({REG}) private Value outputPtr;
-    @Temp({REG}) private Value inputValue;
-    @Temp({REG}) private Value resultValue;
 
+    @Temp({REG}) private Value tempValue;
     @Temp({REG}) private Value broadcastMultValValue;
+    @Temp({REG}) private Value loopIndexValue;
 
-    public SimdDoubleFmaddOp(LIRGeneratorTool tool, Value inputOffset, Value multVal, Value input, Value output) {
+    public SimdDoubleFmaddOp(LIRGeneratorTool tool, Value length, Value multVal, Value input, Value output) {
         super(TYPE);
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
         DOUBLE_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Double)));
 
-        inputOffsetValue = inputOffset;
+        lengthValue = length;
         multValValue = multVal;
         inputPtr = input;
         outputPtr = output;
 
-        inputValue = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        resultValue = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-
-        // TODO: Make the constants alive outside the loop. Reuse registers if possible.
+        tempValue = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
         broadcastMultValValue = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
+        loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-        Register inputOffset = asRegister(inputOffsetValue);
+        Register length = asRegister(lengthValue);
         Register multVal = asRegister(multValValue);
         Register input = asRegister(inputPtr);
         Register output = asRegister(outputPtr);
 
-        Register inValues = asRegister(inputValue);
-        Register result = asRegister(resultValue);
+        Register temp = asRegister(tempValue);
+        Register loopIndex = asRegister(loopIndexValue);
+        Register broadcastMultVal = asRegister(broadcastMultValValue);
 
-         // Load values from input.
-        AMD64Address inputAddress = new AMD64Address(input, inputOffset, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
-        masm.vmovupd(inValues, inputAddress);
-
-        AMD64Address outputAddress = new AMD64Address(output, inputOffset, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
+        Label loopLabel = new Label();
 
         // Make a vector of multVal
-        masm.vbroadcastsd(result, multVal);
+        masm.vbroadcastsd(broadcastMultVal, multVal);
 
-        // Store computation results in result
-        masm.vfmadd213pd(result, inValues, outputAddress);
+        // Initialize loop index
+        masm.movl(loopIndex, 0);
 
+        // Start iterating through arrays and update output array
+        masm.bind(loopLabel);
+        AMD64Address inputAddress = new AMD64Address(input, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
+        masm.vmovupd(temp, inputAddress);
+        AMD64Address outputAddress = new AMD64Address(output, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
+        // temp = (temp * multValVector) + (values in outputAddress)
+        masm.vfmadd213pd(temp, broadcastMultVal, outputAddress);
         // Store result to output
-        masm.vmovupd(outputAddress, result);
+        masm.vmovupd(outputAddress, temp);
+        // Increment loopIndex by 8
+        masm.addl(loopIndex, 8);
+        masm.cmpl(loopIndex, length);
+        masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
     }
 }

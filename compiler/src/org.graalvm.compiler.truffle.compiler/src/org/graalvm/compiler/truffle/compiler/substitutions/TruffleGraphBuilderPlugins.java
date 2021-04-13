@@ -445,8 +445,8 @@ public class TruffleGraphBuilderPlugins {
         });
         r.register4("simdDoubleFmadd", int.class, double.class, double[].class, double[].class, new InvocationPlugin() {
             @Override
-            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode inputOffset, ValueNode multVal, ValueNode input, ValueNode output) {
-                b.add(new SimdDoubleFmaddNode(inputOffset, multVal, input, output));
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode length, ValueNode multVal, ValueNode input, ValueNode output) {
+                b.add(new SimdDoubleFmaddNode(length, multVal, input, output));
                 return true;
             }
         });
