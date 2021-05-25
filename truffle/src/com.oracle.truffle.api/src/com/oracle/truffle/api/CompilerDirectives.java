@@ -582,7 +582,7 @@ public final class CompilerDirectives {
     public static void matmulKernel8x16(double[][] a, double[][] b, double[][] result, int kPanelSize, int i, int k, int j) {
         for(int kk = k; kk < k+kPanelSize; kk++) {
             for(int ii = i; ii < i+8; ii++) {
-                for(int jj = j; jj < j+16; jj++) {
+                for(int jj = j; jj < j+8; jj++) {
                     result[ii][jj] += a[ii][kk]*b[kk][jj];
                 }
             }
