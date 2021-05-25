@@ -4482,6 +4482,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
     }
 
     // _mm512_fmadd_pd
+    public final void vfmadd213pd(Register dst, Register a, Register b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W1 A8 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xA8);
+        emitModRM(dst, b);
+    }
+
+    // _mm512_fmadd_pd
     public final void vfmadd213pd(Register dst, Register a, AMD64Address b) {
         assert supports(CPUFeature.AVX512F);
         // Code: EVEX.512.66.0F38.W1 A8 /r
@@ -4502,7 +4511,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
     // _mm512_mul_pid
     public final void vmulpd(Register dst, Register nds, Register src) {
         assert supports(CPUFeature.AVX512F);
-        // Code: EVEX.512.66.0F.W0 FA /r
+        // Code: EVEX.512.66.0F.W1 59 /r
         evexPrefix(dst, Register.None, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
         emitByte(0x59);
         emitModRM(dst, src);
@@ -4586,9 +4595,18 @@ public class AMD64Assembler extends AMD64BaseAssembler {
     // _mm512_lzcnt_epi32
     public final void vplzcntd(Register dst, Register src) {
         assert supports(CPUFeature.AVX512CD);
-        // Code: EVEX.512.66.0F38.W0 44 /r
+        // Code: EVEX.512.66.0F.W1 EF /r
         evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W0, Z0, B0);
         emitByte(0x44);
         emitModRM(dst, src);
+    }
+
+    // mm512_setzero_pd / vxorpd
+    public final void vxorpd(Register dst, Register a, Register b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 57 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x57);
+        emitModRM(dst, b);
     }
 }
