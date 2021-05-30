@@ -335,4 +335,14 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
                                     Value i, Value k, Value j) {
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
+    /**
+     * Emits instruction(s) to flush an individual cache line that starts at {@code address}.
+     */
+    void emitCacheWriteback(Value address);
+
+    /**
+     * Emits instruction(s) to serialize cache writeback operations relative to preceding (if
+     * {@code isPreSync == true}) or following (if {@code isPreSync == false}) memory writes.
+     */
+    void emitCacheWritebackSync(boolean isPreSync);
 }

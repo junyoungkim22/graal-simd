@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Vector;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 import com.oracle.svm.core.annotate.Alias;
 import com.oracle.svm.core.annotate.Delete;
@@ -221,6 +222,10 @@ final class Target_java_lang_ClassLoader {
         return scl;
     }
 
+    @Alias
+    @TargetElement(onlyWith = JDK11OrLater.class)
+    native Stream<Package> packages();
+
     @Delete
     private static native void initSystemClassLoader();
 
@@ -346,22 +351,10 @@ final class Target_java_lang_ClassLoader {
     @Substitute //
     @SuppressWarnings({"unused"}) //
     private Class<?> findLoadedClass0(String name) {
-        /* See open/src/hotspot/share/prims/jvm.cpp#958. */
-        throw VMError.unsupportedFeature("Target_java_lang_ClassLoader.findLoadedClass0(String)");
-    }
-
-    @Substitute //
-    @TargetElement(onlyWith = JDK11OrLater.class) //
-    @SuppressWarnings({"unused"})
-    protected Class<?> findClass(String moduleName, String name) {
-        throw VMError.unsupportedFeature("JDK11OrLater: Target_java_lang_ClassLoader.findClass(String moduleName, String name)");
-    }
-
-    @Substitute //
-    @TargetElement(onlyWith = JDK11OrLater.class) //
-    @SuppressWarnings({"unused"})
-    public Package getDefinedPackage(String name) {
-        throw VMError.unsupportedFeature("JDK11OrLater: Target_java_lang_ClassLoader.getDefinedPackage(String name)");
+        if (name == null) {
+            return null;
+        }
+        return ClassForNameSupport.forNameOrNull(name, false);
     }
 
     @Substitute
