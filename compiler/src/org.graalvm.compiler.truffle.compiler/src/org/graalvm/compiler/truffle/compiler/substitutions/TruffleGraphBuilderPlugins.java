@@ -451,11 +451,11 @@ public class TruffleGraphBuilderPlugins {
                 return true;
             }
         });
-        r.register7("matmulKernel8x16", double[][].class, double[][].class, double[][].class, int.class, int.class, int.class, int.class, new InvocationPlugin() {
+        r.register7("matmulKernel8x16", double[].class, double[].class, double[].class, int[].class, int.class, int.class, int.class, new InvocationPlugin() {
             @Override
-            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode a, ValueNode bMat, ValueNode result, ValueNode kPanelSize,
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode a, ValueNode bMat, ValueNode result, ValueNode constants,
                                     ValueNode i, ValueNode k, ValueNode j) {
-                b.add(new MatmulKernel8x16Node(a, bMat, result, kPanelSize, i, k, j));
+                b.add(new MatmulKernel8x16Node(a, bMat, result, constants, i, k, j));
                 return true;
             }
         });

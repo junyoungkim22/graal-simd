@@ -579,11 +579,15 @@ public final class CompilerDirectives {
         }
     }
 
-    public static void matmulKernel8x16(double[][] a, double[][] b, double[][] result, int kPanelSize, int i, int k, int j) {
+    public static void matmulKernel8x16(double[] a, double[] b, double[] result, int[] constants, int i, int k, int j) {
+        // constants[0] --> kPanelSize
+        // constants[1] --> len
+        int kPanelSize = constants[0];
+        int len = constants[1];
         for(int kk = k; kk < k+kPanelSize; kk++) {
             for(int ii = i; ii < i+8; ii++) {
                 for(int jj = j; jj < j+8; jj++) {
-                    result[ii][jj] += a[ii][kk]*b[kk][jj];
+                    result[ii*len+jj] += a[ii*len+kk]*b[kk*len+jj];
                 }
             }
         }
