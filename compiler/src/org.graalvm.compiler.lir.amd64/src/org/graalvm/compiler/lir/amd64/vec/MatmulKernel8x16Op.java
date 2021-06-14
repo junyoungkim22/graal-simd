@@ -106,11 +106,9 @@ public final class MatmulKernel8x16Op extends AMD64LIRInstruction {
                                     Value i, Value k, Value j) {
         super(TYPE);
 
+
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
         DOUBLE_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Double)));
-
-        //INT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Int);
-        //INT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Int)));
 
         OBJECT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Object);
         OBJECT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Object)));
@@ -139,34 +137,6 @@ public final class MatmulKernel8x16Op extends AMD64LIRInstruction {
         c11Val = tool.newVariable(LIRKind.value(AMD64Kind.V128_QWORD));
         c12Val = tool.newVariable(LIRKind.value(AMD64Kind.V128_QWORD));
         c13Val = tool.newVariable(LIRKind.value(AMD64Kind.V128_QWORD));
-        /*
-        c00Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c10Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c20Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c30Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c40Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c50Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c60Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c70Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        */
-        /*
-        c00Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c01Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c10Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c11Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c20Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c21Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c30Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c31Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c40Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c41Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c50Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c51Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c60Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c61Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c70Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        c71Val = tool.newVariable(LIRKind.value(AMD64Kind.V512_QWORD));
-        */
 
         loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
         loopEndValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
