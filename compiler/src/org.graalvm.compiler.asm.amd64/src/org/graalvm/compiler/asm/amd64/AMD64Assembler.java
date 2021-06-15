@@ -3875,6 +3875,14 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(dst, src);
     }
 
+    public final void movddup(Register dst, AMD64Address src) {
+        assert supports(CPUFeature.SSE3);
+        assert inRC(XMM, dst);
+        simdPrefix(dst, Register.None, src, SD, P_0F, false);
+        emitByte(0x12);
+        emitOperandHelper(dst, src, 0);
+    }
+
     public final void movdqu(Register dst, AMD64Address src) {
         assert inRC(XMM, dst);
         simdPrefix(dst, Register.None, src, SS, P_0F, false);

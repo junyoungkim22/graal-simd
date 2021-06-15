@@ -203,60 +203,34 @@ public final class MatmulKernel8x16Op extends AMD64LIRInstruction {
         // Iterate from kPos to kPos + kPanelSize-1 and store partial results in c** registers
         masm.bind(loopLabel);
 
-        masm.movl(index, loopIndex);
-        AMD64Address bAddress = new AMD64Address(bPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
+        AMD64Address bAddress = new AMD64Address(bPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
         masm.movq(tempArrayAddressReg0, bAddress);
-        masm.movl(index, jPos);
-        bAddress = new AMD64Address(tempArrayAddressReg0, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
+        bAddress = new AMD64Address(tempArrayAddressReg0, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
         masm.movdqu(b0, bAddress);
 
         //masm.addl(index, 2);
-        bAddress = new AMD64Address(tempArrayAddressReg0, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+16);
+        bAddress = new AMD64Address(tempArrayAddressReg0, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+16);
         masm.movdqu(b1, bAddress);
 
         //masm.addl(index, 2);
-        bAddress = new AMD64Address(tempArrayAddressReg0, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+32);
+        bAddress = new AMD64Address(tempArrayAddressReg0, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+32);
         masm.movdqu(b2, bAddress);
 
         //masm.addl(index, 2);
-        bAddress = new AMD64Address(tempArrayAddressReg0, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+48);
+        bAddress = new AMD64Address(tempArrayAddressReg0, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+48);
         masm.movdqu(b3, bAddress);
 
-        /*
-        masm.movl(index, iPos);
-        AMD64Address aAddress0 = new AMD64Address(aPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
-        masm.movq(tempArrayAddressReg, aAddress0);
-        masm.addl(index, 1);
-        AMD64Address aAddress1 = new AMD64Address(aPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
-        masm.movl(index, loopIndex);
-        aAddress0 = new AMD64Address(tempArrayAddressReg, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
-        masm.movq(aTemp, aAddress0);
-        masm.movddup(aTempBroadcast0, aTemp);
-        masm.movq(tempArrayAddressReg, aAddress1);
-        aAddress1 = new AMD64Address(tempArrayAddressReg, index, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
-        masm.movq(aTemp, aAddress1);
-        masm.movddup(aTempBroadcast1, aTemp);
-        */
-
-        masm.movl(index, iPos);
-        AMD64Address aAddress0 = new AMD64Address(aPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
-        masm.movq(tempArrayAddressReg0, aAddress0);
-        masm.addl(index, 1);
-        AMD64Address aAddress1 = new AMD64Address(aPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
-        masm.movq(tempArrayAddressReg1, aAddress1);
-        //masm.movl(index, loopIndex);
-        aAddress0 = new AMD64Address(tempArrayAddressReg0, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
-        masm.movq(aTemp, aAddress0);
-        masm.movddup(aTempBroadcast0, aTemp);
-
         //masm.movl(index, iPos);
-        //masm.addl(index, 1);
-        //AMD64Address aAddress1 = new AMD64Address(aPtr, index, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
-        //masm.movq(tempArrayAddressReg1, aAddress1);
-        //masm.movl(index, loopIndex);
+        AMD64Address aAddress0 = new AMD64Address(aPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET);
+        masm.movq(tempArrayAddressReg0, aAddress0);
+        AMD64Address aAddress1 = new AMD64Address(aPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8);
+        masm.movq(tempArrayAddressReg1, aAddress1);
+        aAddress0 = new AMD64Address(tempArrayAddressReg0, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
+
+        masm.movddup(aTempBroadcast0, aAddress0);
+
         aAddress1 = new AMD64Address(tempArrayAddressReg1, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
-        masm.movq(aTemp, aAddress1);
-        masm.movddup(aTempBroadcast1, aTemp);
+        masm.movddup(aTempBroadcast1, aAddress1);
 
         masm.movdqu(temp, aTempBroadcast0);
         masm.mulpd(temp, b0);
@@ -285,40 +259,6 @@ public final class MatmulKernel8x16Op extends AMD64LIRInstruction {
 
         masm.mulpd(b3, aTempBroadcast1);
         masm.addpd(c13, b3);
-
-        /*
-        masm.movdqu(temp, aTempBroadcast0);
-        masm.mulpd(temp, b0);
-        masm.addpd(c00, temp);
-
-        masm.movdqu(temp, aTempBroadcast1);
-        masm.mulpd(temp, b0);
-        masm.addpd(c10, temp);
-
-        masm.movdqu(temp, aTempBroadcast0);
-        masm.mulpd(temp, b1);
-        masm.addpd(c01, temp);
-
-        masm.movdqu(temp, aTempBroadcast1);
-        masm.mulpd(temp, b1);
-        masm.addpd(c11, temp);
-
-        masm.movdqu(temp, aTempBroadcast0);
-        masm.mulpd(temp, b2);
-        masm.addpd(c02, temp);
-
-        masm.movdqu(temp, aTempBroadcast1);
-        masm.mulpd(temp, b2);
-        masm.addpd(c12, temp);
-
-        masm.movdqu(temp, aTempBroadcast0);
-        masm.mulpd(temp, b3);
-        masm.addpd(c03, temp);
-
-        masm.movdqu(temp, aTempBroadcast1);
-        masm.mulpd(temp, b3);
-        masm.addpd(c13, temp);
-        */
 
         masm.addl(loopIndex, 1);
         masm.cmpl(loopIndex, loopEnd);
