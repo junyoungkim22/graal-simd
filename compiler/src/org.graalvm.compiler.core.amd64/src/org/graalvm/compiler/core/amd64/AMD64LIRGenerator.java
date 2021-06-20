@@ -109,6 +109,7 @@ import org.graalvm.compiler.lir.amd64.AMD64ZapStackOp;
 import org.graalvm.compiler.lir.amd64.AMD64ZeroMemoryOp;
 import org.graalvm.compiler.lir.amd64.vec.AggregateOp;
 import org.graalvm.compiler.lir.amd64.vec.SimdDoubleFmaddOp;
+import org.graalvm.compiler.lir.amd64.vec.MatmulKernel2x8Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel8x16Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel1D2x8Op;
 import org.graalvm.compiler.lir.amd64.vector.AMD64VectorCompareOp;
@@ -780,6 +781,12 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     public void emitMatmulKernel8x16(Value a, Value b, Value result, Value kPanelSize,
                                     Value i, Value k, Value j) {
         append(new MatmulKernel8x16Op(this, a, b, result, kPanelSize, i, k, j));
+    }
+
+    @Override
+    public void emitMatmulKernel2x8(Value a, Value b, Value result, Value kPanelSize,
+                                    Value i, Value k, Value j) {
+        append(new MatmulKernel2x8Op(this, a, b, result, kPanelSize, i, k, j));
     }
 
     @Override
