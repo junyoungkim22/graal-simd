@@ -2,6 +2,10 @@
 
 This changelog summarizes major changes between Truffle versions relevant to languages implementors building upon the Truffle framework. The main focus is on APIs exported by Truffle.
 
+## Version 21.3.0
+* Added a `@GenerateWrapper.Ignore` annotation to prevent methods from being instrumented in wrapper classes.
+* The native image `TruffleCheckBlackListedMethods` option was deprecated and replaced by the `TruffleCheckBlockListMethods` option.
+
 ## Version 21.2.0
 * Added `TypeDescriptor.subtract(TypeDescriptor)` creating a new `TypeDescriptor` by removing the given type from a union or intersection type.
 * Added `CompilerDirectives.blackhole(value)` which can be helpful for benchmarking.
@@ -16,6 +20,13 @@ This changelog summarizes major changes between Truffle versions relevant to lan
 * Enabled by default the traversing compilation queue with dynamic thresholds, see `PolyglotCompilerOptions#TraversingCompilationQueue`, `PolyglotCompilerOptions#DynamicCompilationThresholds`, `PolyglotCompilerOptions#DynamicCompilerThresholdsMinScale`, `PolyglotCompilerOptions#DynamicCompilerThresholdsMinNormalLoad` and `PolyglotCompilerOptions#DynamicCompilerThresholdsMaxNormalLoad`.
 * Added `LoopConditionProfile#create()` as an alias of `createCountingProfile()` so it can be used like `@Cached LoopConditionProfile loopProfile`.
 * Enabled by default the traversing compilation queue with dynamic thresholds. See [the documentation](https://github.com/oracle/graal/blob/master/truffle/docs/TraversingCompilationQueue.md) for more information.
+* Changed behavior of parameterized `Function<Object, Object>` conversion such that an `Object[]` argument is passed through to the guest function as a single array argument. Both raw `Function` and `Function<Object[], Object>` treat an `Object[]` as an array of arguments, like before.
+* Added `TruffleContext.pause()` and `TruffleContext.resume(Future<Void>)` to pause and resume execution for a truffle context, respectively.
+* Added `DebuggerSession.createPrimitiveValue()` to create a `DebugValue` from a primitive value. Use it instead of `DebugValue.set(primitiveValue)` which is now deprecated.
+* Added support for iterators and hash maps to `DebugValue`. The added methods wraps the respective methods of `InteropLibrary`.
+* Added support for Truffle libraries to be prepared for AOT. See `ExportLibrary.useForAOT` or the `AOTTutorial` java class for further details.
+* The Specialization DSL now generates code to throw an `AssertionError` if a `@Shared` and `@Cached` parameter returns a non-null value and is used in a guard. The `null` state is reserved for the uninitialized state.
+* Changed `TruffleLanguage.disposeContext`. In case the underlying polyglot context is being cancelled, `TruffleLanguage.disposeContext` is called even if `TruffleLanguage.finalizeContext` throws a TruffleException or a ThreadDeath exception.
 
 ## Version 21.1.0
 * Added methods into `Instrumenter` that create bindings to be attached later on. Added `EventBinding.attach()` method.

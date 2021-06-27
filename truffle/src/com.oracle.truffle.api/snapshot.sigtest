@@ -240,12 +240,14 @@ meth public int hashCode()
 meth public java.lang.Object enter()
  anno 0 java.lang.Deprecated()
 meth public java.lang.Object enter(com.oracle.truffle.api.nodes.Node)
+meth public java.util.concurrent.Future<java.lang.Void> pause()
 meth public void close()
 meth public void closeCancelled(com.oracle.truffle.api.nodes.Node,java.lang.String)
 meth public void closeResourceExhausted(com.oracle.truffle.api.nodes.Node,java.lang.String)
 meth public void leave(com.oracle.truffle.api.nodes.Node,java.lang.Object)
 meth public void leave(java.lang.Object)
  anno 0 java.lang.Deprecated()
+meth public void resume(java.util.concurrent.Future<java.lang.Void>)
 supr java.lang.Object
 hfds CONTEXT_ASSERT_STACK,EMPTY,closeable,polyglotContext
 
@@ -882,7 +884,6 @@ meth public static com.oracle.truffle.api.memory.ByteArraySupport littleEndian()
 supr java.lang.Object
 
 CLSS public final com.oracle.truffle.api.memory.MemoryFence
-cons private init()
 meth public static void acquire()
 meth public static void full()
 meth public static void loadLoad()
@@ -1245,6 +1246,7 @@ meth public static <%0 extends java.lang.Object> {%%0} findFirstNodeInstance(com
 meth public static <%0 extends java.lang.Object> {%%0} findParent(com.oracle.truffle.api.nodes.Node,java.lang.Class<{%%0}>)
 meth public static <%0 extends java.lang.Object> {%%0}[] concat({%%0}[],{%%0}[])
 meth public static <%0 extends java.lang.annotation.Annotation> {%%0} findAnnotation(java.lang.Class<?>,java.lang.Class<{%%0}>)
+meth public static boolean assertRecursion(com.oracle.truffle.api.nodes.Node,int)
 meth public static boolean forEachChild(com.oracle.truffle.api.nodes.Node,com.oracle.truffle.api.nodes.NodeVisitor)
 meth public static boolean isReplacementSafe(com.oracle.truffle.api.nodes.Node,com.oracle.truffle.api.nodes.Node,com.oracle.truffle.api.nodes.Node)
 meth public static boolean replaceChild(com.oracle.truffle.api.nodes.Node,com.oracle.truffle.api.nodes.Node,com.oracle.truffle.api.nodes.Node)

@@ -1848,7 +1848,7 @@ public final class BytecodeNode extends EspressoMethodNode {
 
     // region quickenForeign
 
-    public int quickenGetField(final VirtualFrame frame, long[] primitives, Object[] refs, int top, int curBCI, int opcode, int statementIndex, Field field) {
+    public int quickenGetField(final VirtualFrame frame, long[] primitives, Object[] refs, int top, int curBCI, int opcode, int statementIndex, Field.FieldVersion field) {
         CompilerDirectives.transferToInterpreterAndInvalidate();
         assert opcode == GETFIELD;
         BaseQuickNode getField = tryPatchQuick(curBCI, () -> new QuickenedGetFieldNode(top, curBCI, statementIndex, field));
@@ -2102,7 +2102,7 @@ public final class BytecodeNode extends EspressoMethodNode {
         return getConstantPool().resolvedMethodAtNoCache(getMethod().getDeclaringKlass(), cpi);
     }
 
-    private Field resolveField(int opcode, char cpi) {
+    private Field.FieldVersion resolveField(int opcode, char cpi) {
         assert opcode == GETFIELD || opcode == GETSTATIC || opcode == PUTFIELD || opcode == PUTSTATIC;
         return getConstantPool().resolvedFieldAt(getMethod().getDeclaringKlass(), cpi);
     }
@@ -2267,8 +2267,9 @@ public final class BytecodeNode extends EspressoMethodNode {
      *   curBCI = bs.next(curBCI);
      * </pre>
      */
-    private int putField(VirtualFrame frame, long[] primitives, Object[] refs, int top, Field field, int curBCI, int opcode, int statementIndex) {
+    private int putField(VirtualFrame frame, long[] primitives, Object[] refs, int top, Field.FieldVersion fieldVersion, int curBCI, int opcode, int statementIndex) {
         assert opcode == PUTFIELD || opcode == PUTSTATIC;
+        Field field = fieldVersion.getField();
         CompilerAsserts.partialEvaluationConstant(field);
 
         /*
@@ -2426,10 +2427,11 @@ public final class BytecodeNode extends EspressoMethodNode {
      *   curBCI = bs.next(curBCI);
      * </pre>
      */
-    private int getField(VirtualFrame frame, long[] primitives, Object[] refs, int top, Field field, int curBCI, int opcode, int statementIndex) {
+    private int getField(VirtualFrame frame, long[] primitives, Object[] refs, int top, Field.FieldVersion fieldVersion, int curBCI, int opcode, int statementIndex) {
         assert opcode == GETFIELD || opcode == GETSTATIC;
-        CompilerAsserts.partialEvaluationConstant(field);
 
+        Field field = fieldVersion.getField();
+        CompilerAsserts.partialEvaluationConstant(field);
         /*
          * GETFIELD: Otherwise, if the resolved field is a static field, getfield throws an
          * IncompatibleClassChangeError.
@@ -2459,7 +2461,7 @@ public final class BytecodeNode extends EspressoMethodNode {
             if (receiver.isForeignObject()) {
                 // Restore the receiver for quickening.
                 putObject(refs, slot, receiver);
-                return quickenGetField(frame, primitives, refs, top, curBCI, opcode, statementIndex, field);
+                return quickenGetField(frame, primitives, refs, top, curBCI, opcode, statementIndex, fieldVersion);
             }
         }
 
@@ -2479,7 +2481,7 @@ public final class BytecodeNode extends EspressoMethodNode {
             case Float   : putFloat(primitives, resultAt, InterpreterToVM.getFieldFloat(receiver, field));   break;
             case Long    : putLong(primitives, resultAt, InterpreterToVM.getFieldLong(receiver, field));     break;
             case Object  : {
-                StaticObject value = InterpreterToVM.getFieldObject(receiver, field);
+                StaticObject value = InterpreterToVM.getFieldObject(receiver, fieldVersion);
                 putObject(refs, resultAt, value);
                 checkNoForeignObjectAssumption(value);
                 break;
@@ -2696,16 +2698,16 @@ public final class BytecodeNode extends EspressoMethodNode {
         }
 
         public void notifyEntry(@SuppressWarnings("unused") VirtualFrame frame, EspressoInstrumentableNode instrumentableNode) {
-            if (method.hasActiveHook()) {
-                if (context.getJDWPListener().onMethodEntry(method, instrumentableNode.getScope(frame, true))) {
+            if (context.shouldReportVMEvents() && method.hasActiveHook()) {
+                if (context.reportOnMethodEntry(method, instrumentableNode.getScope(frame, true))) {
                     enterAt(frame, 0);
                 }
             }
         }
 
         public void notifyReturn(VirtualFrame frame, int statementIndex, Object returnValue) {
-            if (method.hasActiveHook()) {
-                if (context.getJDWPListener().onMethodReturn(method, returnValue)) {
+            if (context.shouldReportVMEvents() && method.hasActiveHook()) {
+                if (context.reportOnMethodReturn(method, returnValue)) {
                     enterAt(frame, statementIndex);
                 }
             }
@@ -2721,16 +2723,16 @@ public final class BytecodeNode extends EspressoMethodNode {
         }
 
         public void notifyFieldModification(VirtualFrame frame, int index, Field field, StaticObject receiver, Object value) {
-            if (field.hasActiveBreakpoint()) {
-                if (context.getJDWPListener().onFieldModification(field, receiver, value)) {
+            if (context.shouldReportVMEvents() && field.hasActiveBreakpoint()) {
+                if (context.reportOnFieldModification(field, receiver, value)) {
                     enterAt(frame, index);
                 }
             }
         }
 
         public void notifyFieldAccess(VirtualFrame frame, int index, Field field, StaticObject receiver) {
-            if (field.hasActiveBreakpoint()) {
-                if (context.getJDWPListener().onFieldAccess(field, receiver)) {
+            if (context.shouldReportVMEvents() && field.hasActiveBreakpoint()) {
+                if (context.reportOnFieldAccess(field, receiver)) {
                     enterAt(frame, index);
                 }
             }

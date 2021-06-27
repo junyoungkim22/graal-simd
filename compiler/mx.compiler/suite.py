@@ -1,10 +1,10 @@
 suite = {
-  "mxversion" : "5.292.5",
+  "mxversion" : "5.302.1",
   "name" : "compiler",
   "sourceinprojectwhitelist" : [],
 
   "groupId" : "org.graalvm.compiler",
-  "version" : "21.2.0",
+  "version" : "21.3.0",
   "release" : False,
   "url" : "http://www.graalvm.org/",
   "developer" : {
@@ -804,6 +804,25 @@ suite = {
       "workingSets" : "Graal,HotSpot,Test",
     },
 
+    "org.graalvm.compiler.hotspot.jdk16.test" : {
+      "testProject" : True,
+      "subDir" : "src",
+      "sourceDirs" : ["src"],
+      "dependencies" : [
+        "org.graalvm.compiler.replacements.test",
+      ],
+      "requiresConcealed" : {
+        "java.base" : [
+          "jdk.internal.misc",
+        ],
+        "jdk.internal.vm.ci" : [
+          "jdk.vm.ci.meta",
+        ],
+      },
+      "checkstyle": "org.graalvm.compiler.graph",
+      "javaCompliance" : "16+",
+      "workingSets" : "Graal,HotSpot,Test",
+    },
 
     "org.graalvm.compiler.hotspot.lir.test" : {
       "subDir" : "src",
@@ -988,6 +1007,15 @@ suite = {
         "org.graalvm.compiler.code",
       ],
       "annotationProcessors" : ["GRAAL_PROCESSOR"],
+      "checkstyle" : "org.graalvm.compiler.graph",
+      "javaCompliance" : "8+",
+      "workingSets" : "Graal,LIR",
+    },
+
+    "org.graalvm.compiler.lir.processor" : {
+      "subDir" : "src",
+      "sourceDirs" : ["src"],
+      "dependencies" : ["org.graalvm.compiler.processor"],
       "checkstyle" : "org.graalvm.compiler.graph",
       "javaCompliance" : "8+",
       "workingSets" : "Graal,LIR",
@@ -1662,7 +1690,7 @@ suite = {
       "javaCompliance" : "11+",
       "checkPackagePrefix" : "false",
       "overlayTarget" : "org.graalvm.compiler.truffle.runtime.serviceprovider",
-      "multiReleaseJarVersion" : "9",
+      "multiReleaseJarVersion" : "11",
       "workingSets" : "Graal,Truffle",
     },
 
@@ -1948,7 +1976,7 @@ suite = {
       "checkstyle" : "org.graalvm.compiler.graph",
       "javaCompliance" : "11+",
       "overlayTarget" : "org.graalvm.compiler.truffle.runtime.hotspot",
-      "multiReleaseJarVersion" : "9",
+      "multiReleaseJarVersion" : "11",
       "workingSets" : "Graal,Truffle",
     },
 
@@ -2041,6 +2069,7 @@ suite = {
         "org.graalvm.compiler.hotspot.amd64.test",
         "org.graalvm.compiler.hotspot.lir.test",
         "org.graalvm.compiler.hotspot.jdk15.test",
+        "org.graalvm.compiler.hotspot.jdk16.test",
         "org.graalvm.compiler.hotspot.jdk9.test",
         "org.graalvm.compiler.options.test",
         "org.graalvm.compiler.jtt",
@@ -2114,7 +2143,8 @@ suite = {
         "org.graalvm.compiler.serviceprovider.processor",
         "org.graalvm.compiler.nodeinfo.processor",
         "org.graalvm.compiler.replacements.processor",
-        "org.graalvm.compiler.core.match.processor"
+        "org.graalvm.compiler.core.match.processor",
+        "org.graalvm.compiler.lir.processor",
        ],
       "maven": False,
     },

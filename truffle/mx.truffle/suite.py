@@ -41,7 +41,7 @@
 suite = {
   "mxversion" : "5.300.4",
   "name" : "truffle",
-  "version" : "21.2.0",
+  "version" : "21.3.0",
   "release" : False,
   "groupId" : "org.graalvm.truffle",
   "sourceinprojectwhitelist" : [],
@@ -174,6 +174,19 @@ suite = {
       "dependencies" : [
         "sdk:GRAAL_SDK",
         "com.oracle.truffle.api.instrumentation",
+        "com.oracle.truffle.api.exception",
+      ],
+      "annotationProcessors" : ["TRUFFLE_DSL_PROCESSOR"],
+      "checkstyle" : "com.oracle.truffle.api",
+      "javaCompliance" : "8+",
+      "workingSets" : "API,Truffle",
+    },
+
+    "com.oracle.truffle.host" : {
+      "subDir" : "src",
+      "sourceDirs" : ["src"],
+      "dependencies" : [
+        "sdk:GRAAL_SDK",
         "com.oracle.truffle.api.exception",
         "truffle:TRUFFLE_ASM_7.2",
       ],
@@ -858,7 +871,8 @@ suite = {
           "com.oracle.truffle.api.impl.TruffleLocator",
           "com.oracle.truffle.api.TruffleLanguage.Provider",
           "com.oracle.truffle.api.instrumentation.TruffleInstrument.Provider",
-          "com.oracle.truffle.api.library.DefaultExportProvider"
+          "com.oracle.truffle.api.library.DefaultExportProvider",
+          "com.oracle.truffle.api.library.EagerExportProvider"
         ],
       },
       "moduleInfo:open" : {
@@ -900,6 +914,7 @@ suite = {
         "com.oracle.truffle.object",
         "com.oracle.truffle.api.object.dsl",
         "com.oracle.truffle.polyglot",
+        "com.oracle.truffle.host",
       ],
       "distDependencies" : [
         "sdk:GRAAL_SDK"

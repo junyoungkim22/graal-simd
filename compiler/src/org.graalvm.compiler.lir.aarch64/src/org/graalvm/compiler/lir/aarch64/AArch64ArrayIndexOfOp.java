@@ -196,10 +196,10 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
 
         // 1. Duplicate the searchChar to 64-bits
         if (!isUTF16) {
-            masm.or(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE);
+            masm.orr(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE);
         }
-        masm.or(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE * 2);
-        masm.or(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE * 4);
+        masm.orr(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE * 2);
+        masm.orr(64, searchChar, searchChar, searchChar, ShiftType.LSL, Byte.SIZE * 4);
 
         // 2.1 Set end index at the starting position of the last chunk
         masm.sub(64, endIndex, arrayLength, chunkSize / charSize);
@@ -210,7 +210,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
          */
         masm.sub(64, curIndex, fromIndex, endIndex);
         if (isUTF16) {
-            masm.shl(64, curIndex, curIndex, 1);
+            masm.lsl(64, curIndex, curIndex, 1);
         }
 
         try (ScratchRegister scratchReg1 = masm.getScratchRegister(); ScratchRegister scratchReg2 = masm.getScratchRegister()) {
@@ -222,7 +222,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
             masm.bind(chunkedReadLoop);
             masm.ldr(64, curChar, AArch64Address.createRegisterOffsetAddress(baseAddress, curIndex, false));
             masm.eor(64, curChar, searchChar, curChar);
-            masm.or(64, tmp2, curChar, bitMask7f);
+            masm.orr(64, tmp2, curChar, bitMask7f);
             masm.sub(64, curChar, curChar, bitMask01Reg);
             masm.bics(64, curChar, curChar, tmp2);
             masm.branchConditionally(ConditionFlag.NE, charInChunk);
@@ -258,7 +258,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.bind(match);
         if (isUTF16) {
             // Convert byte offset of searchChar to its char index in UTF-16 string
-            masm.ashr(64, curIndex, curIndex, 1);
+            masm.asr(64, curIndex, curIndex, 1);
         }
         masm.add(64, result, endIndex, curIndex);
         masm.bind(end);

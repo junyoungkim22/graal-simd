@@ -53,6 +53,7 @@ import com.oracle.truffle.espresso.classfile.attributes.EnclosingMethodAttribute
 import com.oracle.truffle.espresso.classfile.attributes.InnerClassesAttribute;
 import com.oracle.truffle.espresso.classfile.attributes.NestHostAttribute;
 import com.oracle.truffle.espresso.classfile.attributes.NestMembersAttribute;
+import com.oracle.truffle.espresso.classfile.attributes.PermittedSubclassesAttribute;
 import com.oracle.truffle.espresso.classfile.attributes.SignatureAttribute;
 import com.oracle.truffle.espresso.classfile.attributes.SourceDebugExtensionAttribute;
 import com.oracle.truffle.espresso.descriptors.Names;
@@ -163,11 +164,11 @@ public final class ObjectKlass extends Klass {
         System.arraycopy(skFieldTable, 0, fieldTable, 0, skFieldTable.length);
         localFieldTableIndex = skFieldTable.length;
         for (int i = 0; i < lkInstanceFields.length; i++) {
-            Field instanceField = new Field(this, lkInstanceFields[i]);
+            Field instanceField = new Field(this, lkInstanceFields[i], pool);
             fieldTable[localFieldTableIndex + i] = instanceField;
         }
         for (int i = 0; i < lkStaticFields.length; i++) {
-            Field staticField = new Field(this, lkStaticFields[i]);
+            Field staticField = new Field(this, lkStaticFields[i], pool);
             staticFieldTable[i] = staticField;
         }
 
@@ -304,9 +305,9 @@ public final class ObjectKlass extends Klass {
 
                     initState = PREPARED;
                     if (getContext().isMainThreadCreated()) {
-                        if (getContext().getJDWPListener() != null) {
+                        if (getContext().shouldReportVMEvents()) {
                             prepareThread = getContext().getGuestThreadFromHost(Thread.currentThread());
-                            getContext().getJDWPListener().classPrepared(this, prepareThread);
+                            getContext().reportClassPrepared(this, prepareThread);
                         }
                     }
                     if (!isInterface()) {
@@ -567,6 +568,32 @@ public final class ObjectKlass extends Klass {
                 if (k == pool.resolvedKlassAt(this, index)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    public boolean permittedSubclassCheck(ObjectKlass k) {
+        CompilerAsserts.neverPartOfCompilation();
+        if (!getContext().getJavaVersion().java17OrLater()) {
+            return true;
+        }
+        PermittedSubclassesAttribute permittedSubclasses = (PermittedSubclassesAttribute) getAttribute(PermittedSubclassesAttribute.NAME);
+        if (permittedSubclasses == null) {
+            return true;
+        }
+        if (module() != k.module()) {
+            return false;
+        }
+        if (!isPublic() && !sameRuntimePackage(k)) {
+            return false;
+        }
+        RuntimeConstantPool pool = getConstantPool();
+        for (int index : permittedSubclasses.getClasses()) {
+            if (k.getName().equals(pool.classAt(index).getName(pool))) {
+                // There should be no need to resolve: the previous checks guarantees it would
+                // resolve to k, but resolving here would cause circularity errors.
+                return true;
             }
         }
         return false;
@@ -1104,24 +1131,10 @@ public final class ObjectKlass extends Klass {
         }
         LinkedKlass linkedKlass = LinkedKlass.redefine(parserKlass, getSuperKlass().getLinkedKlass(), interfaces, getLinkedKlass());
 
-        // fields
-        if (!change.getOuterFields().isEmpty()) {
-            LinkedField[] instanceFields = linkedKlass.getInstanceFields();
-            for (Field outerField : change.getOuterFields()) {
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-
-                // we know that the special field is always at the same index
-                for (int i = 0; i < fieldTable.length; i++) {
-                    Field oldField = fieldTable[i];
-                    if (outerField == oldField) {
-                        for (LinkedField instanceField : instanceFields) {
-                            if (instanceField.getName().equals(outerField.getName())) {
-                                // replace with new field
-                                fieldTable[i] = new Field(this, instanceField);
-                            }
-                        }
-                    }
-                }
+        // changed object type fields handling
+        if (!change.getChangedObjectTypeFields().isEmpty()) {
+            for (Map.Entry<Field, ParserField> entry : change.getChangedObjectTypeFields().entrySet()) {
+                entry.getKey().redefineField(entry.getValue(), pool);
             }
         }
 

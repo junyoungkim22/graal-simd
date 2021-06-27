@@ -146,9 +146,10 @@ class NativeImageVM(GraalVm):
             self.log_dir = self.output_dir
             self.analysis_report_path = os.path.join(self.output_dir, self.executable_name + '-analysis.json')
             self.base_image_build_args = [os.path.join(mx_sdk_vm_impl.graalvm_home(fatalIfMissing=True), 'bin', 'native-image')]
-            self.base_image_build_args += ['--no-fallback', '--no-server', '-g', '--allow-incomplete-classpath']
+            self.base_image_build_args += ['--no-fallback', '-g', '--allow-incomplete-classpath']
             self.base_image_build_args += ['-H:+VerifyGraalGraphs', '-H:+VerifyPhases'] if vm.is_gate else []
             self.base_image_build_args += ['-J-ea', '-J-esa'] if vm.is_gate and not bm_suite.skip_build_assertions(self.benchmark_name) else []
+
             self.base_image_build_args += self.system_properties
             self.base_image_build_args += self.classpath_arguments
             self.base_image_build_args += self.executable
@@ -159,10 +160,15 @@ class NativeImageVM(GraalVm):
                 self.base_image_build_args += ['-H:CompilerBackend=llvm', '-H:Features=org.graalvm.home.HomeFinderFeature', '-H:DeadlockWatchdogInterval=0']
             if vm.gc:
                 self.base_image_build_args += ['--gc=' + vm.gc, '-H:+SpawnIsolates']
+            if vm.native_architecture:
+                self.base_image_build_args += ['-H:+NativeArchitecture']
             self.base_image_build_args += self.extra_image_build_arguments
 
-    def __init__(self, name, config_name, extra_java_args, extra_launcher_args, pgo_instrumented_iterations, pgo_inline_explored, hotspot_pgo, is_gate, is_llvm=False, pgo_context_sensitive=True, gc=None):
+    def __init__(self, name, config_name, extra_java_args=None, extra_launcher_args=None,
+                 pgo_aot_inline=False, pgo_instrumented_iterations=0, pgo_inline_explored=False, hotspot_pgo=False,
+                 is_gate=False, is_llvm=False, pgo_context_sensitive=True, gc=None, native_architecture=False):
         super(NativeImageVM, self).__init__(name, config_name, extra_java_args, extra_launcher_args)
+        self.pgo_aot_inline = pgo_aot_inline
         self.pgo_instrumented_iterations = pgo_instrumented_iterations
         self.pgo_context_sensitive = pgo_context_sensitive
         self.pgo_inline_explored = pgo_inline_explored
@@ -170,6 +176,7 @@ class NativeImageVM(GraalVm):
         self.is_gate = is_gate
         self.is_llvm = is_llvm
         self.gc = gc
+        self.native_architecture = native_architecture
 
     @staticmethod
     def supported_vm_arg_prefixes():
@@ -204,14 +211,15 @@ class NativeImageVM(GraalVm):
     @staticmethod
     def extract_benchmark_arguments(args):
         i = 0
+        clean_args = args[:]
         while i < len(args):
             if args[i].startswith('--jvmArgsPrepend'):
-                args[i + 1] = ' '.join([x for x in args[i + 1].split(' ') if "-Dnative-image" not in x])
+                clean_args[i + 1] = ' '.join([x for x in args[i + 1].split(' ') if "-Dnative-image" not in x])
                 i += 2
             else:
                 i += 1
-        args = [x for x in args if "-Dnative-image" not in x]
-        vm_args, executable, image_run_args = NativeImageVM._split_vm_arguments(args)
+        clean_args = [x for x in clean_args if "-Dnative-image" not in x]
+        vm_args, executable, image_run_args = NativeImageVM._split_vm_arguments(clean_args)
 
         classpath_arguments = []
         system_properties = [a for a in vm_args if a.startswith('-D')]
@@ -372,7 +380,7 @@ class NativeImageVM(GraalVm):
             return self
 
         def execute_command(self, vm=None):
-            write_output = self.current_stage == 'run' or self.is_gate
+            write_output = self.current_stage == 'run' or self.current_stage == 'image' or self.is_gate
             cmd = self.command
             self.exit_code = self.config.bmSuite.run_stage(vm, self.current_stage, cmd, self.stdout(write_output), self.stderr(write_output), self.cwd, False)
             if "image" not in self.current_stage and self.config.bmSuite.validateReturnCode(self.exit_code):
@@ -517,15 +525,20 @@ class NativeImageVM(GraalVm):
         with stages.set_command([java_command] + hotspot_args) as s:
             s.execute_command()
             if self.hotspot_pgo and s.exit_code == 0:
-                mx.copyfile(profile_path, config.latest_profile_path)
+                # Hotspot instrumentation does not produce profiling information for the helloworld benchmark
+                if os.path.exists(profile_path):
+                    mx.copyfile(profile_path, config.latest_profile_path)
+                else:
+                    mx.warn("No profile information emitted during agent run.")
 
     def run_stage_instrument_image(self, config, stages, out, i, instrumentation_image_name, image_path, image_path_latest, instrumented_iterations):
         executable_name_args = ['-H:Name=' + instrumentation_image_name]
         pgo_verification_output_path = os.path.join(config.output_dir, instrumentation_image_name + '-probabilities.log')
         pgo_args = ['--pgo=' + config.latest_profile_path, '-H:+VerifyPGOProfiles', '-H:VerificationDumpFile=' + pgo_verification_output_path]
+        pgo_args += ['-H:' + ('+' if self.pgo_context_sensitive else '-') + 'EnablePGOContextSensitivity']
+        pgo_args += ['-H:+AOTInliner'] if self.pgo_aot_inline else ['-H:-AOTInliner']
         instrument_args = ['--pgo-instrument'] + ([] if i == 0 else pgo_args)
         instrument_args += ['-H:+InlineAllExplored'] if self.pgo_inline_explored else []
-        instrument_args += ['-H:' + ('+' if self.pgo_context_sensitive else '-') + 'EnablePGOContextSensitivity']
 
         with stages.set_command(config.base_image_build_args + executable_name_args + instrument_args) as s:
             s.execute_command()
@@ -549,10 +562,12 @@ class NativeImageVM(GraalVm):
     def run_stage_image(self, config, stages):
         executable_name_args = ['-H:Name=' + config.final_image_name]
         pgo_verification_output_path = os.path.join(config.output_dir, config.final_image_name + '-probabilities.log')
-        pgo_args = ['--pgo=' + config.latest_profile_path, '-H:+VerifyPGOProfiles', '-H:VerificationDumpFile=' + pgo_verification_output_path] if self.pgo_instrumented_iterations > 0 or self.hotspot_pgo else []
-        final_image_command = config.base_image_build_args + executable_name_args + pgo_args
+        pgo_args = ['--pgo=' + config.latest_profile_path, '-H:+VerifyPGOProfiles', '-H:VerificationDumpFile=' + pgo_verification_output_path]
+        pgo_args += ['-H:' + ('+' if self.pgo_context_sensitive else '-') + 'EnablePGOContextSensitivity']
+        pgo_args += ['-H:+AOTInliner'] if self.pgo_aot_inline else ['-H:-AOTInliner']
+        final_image_command = config.base_image_build_args + executable_name_args + (pgo_args if self.pgo_instrumented_iterations > 0 or (self.hotspot_pgo and os.path.exists(config.latest_profile_path)) else [])
         with stages.set_command(final_image_command) as s:
-            s.execute_command(True)
+            s.execute_command()
 
     def run_stage_run(self, config, stages, out):
         image_path = os.path.join(config.output_dir, config.final_image_name)
@@ -564,7 +579,7 @@ class NativeImageVM(GraalVm):
                 out('The executed image size for benchmark ' + config.benchmark_suite_name + ':' + config.benchmark_name + ' is ' + str(image_size) + ' B')
                 image_sections_command = "objdump -h " + image_path
                 out(subprocess.check_output(image_sections_command, shell=True, universal_newlines=True))
-                for config_type in ['jni', 'proxy', 'reflect', 'resource', 'serialization']:
+                for config_type in ['jni', 'proxy', 'predefined-classes', 'reflect', 'resource', 'serialization']:
                     config_path = os.path.join(config.config_dir, config_type + '-config.json')
                     if os.path.exists(config_path):
                         config_size = os.stat(config_path).st_size
@@ -630,8 +645,7 @@ class NativeImageVM(GraalVm):
 
 class NativeImageBuildVm(GraalVm):
     def run(self, cwd, args):
-        default_args = ['--no-server'] if mx_sdk_vm_impl.has_svm_launcher('svm') else []
-        return self.run_launcher('native-image', default_args + args, cwd)
+        return self.run_launcher('native-image', args, cwd)
 
 
 class GuVm(GraalVm):
@@ -865,9 +879,10 @@ def register_graalvm_vms():
     # We support only EE and CE configuration for native-image benchmarks
     for short_name, config_suffix in [('niee', 'ee'), ('ni', 'ce')]:
         if any(component.short_name == short_name for component in mx_sdk_vm_impl.registered_graalvm_components(stage1=False)):
-            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'default-' + config_suffix, None, None, 0, False, False, False), _suite, 10)
-            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'gate-' + config_suffix, None, None, 0, False, False, True), _suite, 10)
-            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'llvm-' + config_suffix, None, None, 0, False, False, False, True), _suite, 10)
+            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'default-' + config_suffix), _suite, 10)
+            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'gate-' + config_suffix, is_gate=True), _suite, 10)
+            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'llvm-' + config_suffix, is_llvm=True), _suite, 10)
+            mx_benchmark.add_java_vm(NativeImageVM('native-image', 'native-architecture-' + config_suffix, native_architecture=True), _suite, 10)
             break
 
     # Add VMs for libgraal

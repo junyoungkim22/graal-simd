@@ -63,6 +63,7 @@ import com.oracle.svm.core.ParsingReason;
 import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.TypeResult;
 import com.oracle.svm.core.annotate.Delete;
+import com.oracle.svm.core.hub.ClassForNameSupport;
 import com.oracle.svm.core.option.HostedOptionKey;
 import com.oracle.svm.core.util.VMError;
 import com.oracle.svm.hosted.ExceptionSynthesizer;
@@ -216,6 +217,7 @@ public final class ReflectionPlugins {
     private void registerClassPlugins(InvocationPlugins plugins) {
         registerFoldInvocationPlugins(plugins, Class.class,
                         "getClassLoader",
+                        "isInterface", "isPrimitive",
                         "getField", "getMethod", "getConstructor",
                         "getDeclaredField", "getDeclaredMethod", "getDeclaredConstructor");
 
@@ -285,6 +287,9 @@ public final class ReflectionPlugins {
             return throwException(b, targetMethod, targetParameters, e.getClass(), e.getMessage());
         }
         Class<?> clazz = typeResult.get();
+        if (!ClassForNameSupport.canBeFolded(clazz)) {
+            return false;
+        }
 
         JavaConstant classConstant = pushConstant(b, targetMethod, targetParameters, JavaKind.Object, clazz);
         if (classConstant == null) {
@@ -292,7 +297,7 @@ public final class ReflectionPlugins {
         }
 
         if (initialize) {
-            classInitializationPlugin.apply(b, b.getMetaAccess().lookupJavaType(clazz), null, null);
+            classInitializationPlugin.apply(b, b.getMetaAccess().lookupJavaType(clazz), () -> null, null);
         }
         return true;
     }
@@ -458,6 +463,7 @@ public final class ReflectionPlugins {
      * initialized. Therefore, we want to intrinsify the same, eagerly initialized object during
      * compilation, not a lossy copy of it.
      */
+    @SuppressWarnings("unchecked")
     private <T> T getIntrinsic(GraphBuilderContext context, T element) {
         if (reason == ParsingReason.UnsafeSubstitutionAnalysis || reason == ParsingReason.EarlyClassInitializerAnalysis) {
             /* We are analyzing the static initializers and should always intrinsify. */
@@ -478,6 +484,11 @@ public final class ReflectionPlugins {
             }
 
             Object replaced = aUniverse.replaceObject(element);
+
+            if (parseOnce) {
+                /* No separate parsing for compilation, so no need to cache the result. */
+                return (T) replaced;
+            }
 
             /* During parsing for analysis we intrinsify and cache the result for compilation. */
             ImageSingletons.lookup(ReflectionPluginRegistry.class).add(context.getCallingContext(), replaced);

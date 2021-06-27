@@ -32,7 +32,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -51,7 +50,7 @@ import com.oracle.svm.core.jdk.RecordSupport;
 import com.oracle.svm.core.util.UserError;
 import com.oracle.svm.core.util.VMError;
 import com.oracle.svm.hosted.FeatureImpl.DuringAnalysisAccessImpl;
-import com.oracle.svm.hosted.FeatureImpl.DuringSetupAccessImpl;
+import com.oracle.svm.hosted.FeatureImpl.FeatureAccessImpl;
 import com.oracle.svm.hosted.substitute.SubstitutionReflectivityFilter;
 import com.oracle.svm.util.ReflectionUtil;
 
@@ -62,7 +61,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     public static final Constructor<?>[] EMPTY_CONSTRUCTORS = new Constructor<?>[0];
     public static final Class<?>[] EMPTY_CLASSES = new Class<?>[0];
 
-    private boolean modified;
+    private final Set<Class<?>> modifiedClasses = ConcurrentHashMap.newKeySet();
     private boolean sealed;
 
     private final DynamicHub.ReflectionData arrayReflectionData;
@@ -75,7 +74,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
 
     private final ReflectionDataAccessors accessors;
 
-    public ReflectionDataBuilder(DuringSetupAccessImpl access) {
+    public ReflectionDataBuilder(FeatureAccessImpl access) {
         arrayReflectionData = getArrayReflectionData();
         accessors = new ReflectionDataAccessors(access);
     }
@@ -110,16 +109,20 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     @Override
     public void register(Class<?>... classes) {
         checkNotSealed();
-        if (reflectionClasses.addAll(Arrays.asList(classes))) {
-            modified = true;
+        for (Class<?> clazz : classes) {
+            if (reflectionClasses.add(clazz)) {
+                modifiedClasses.add(clazz);
+            }
         }
     }
 
     @Override
     public void register(Executable... methods) {
         checkNotSealed();
-        if (reflectionMethods.addAll(Arrays.asList(methods))) {
-            modified = true;
+        for (Executable method : methods) {
+            if (reflectionMethods.add(method)) {
+                modifiedClasses.add(method.getDeclaringClass());
+            }
         }
     }
 
@@ -127,8 +130,10 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     public void register(boolean finalIsWritable, Field... fields) {
         checkNotSealed();
         // Unsafe and write accesses are always enabled for fields because accessors use Unsafe.
-        if (reflectionFields.addAll(Arrays.asList(fields))) {
-            modified = true;
+        for (Field field : fields) {
+            if (reflectionFields.add(field)) {
+                modifiedClasses.add(field.getDeclaringClass());
+            }
         }
     }
 
@@ -187,17 +192,15 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     }
 
     private void processRegisteredElements(DuringAnalysisAccessImpl access) {
-        if (!modified) {
+        if (modifiedClasses.isEmpty()) {
             return;
         }
-        modified = false;
         access.requireAnalysisIteration();
 
-        Set<Class<?>> allClasses = new HashSet<>(reflectionClasses);
-        reflectionMethods.stream().map(Executable::getDeclaringClass).forEach(allClasses::add);
-        reflectionFields.stream().map(Field::getDeclaringClass).forEach(allClasses::add);
-
-        allClasses.forEach(clazz -> processClass(access, clazz));
+        for (Class<?> clazz : modifiedClasses) {
+            processClass(access, clazz);
+        }
+        modifiedClasses.clear();
     }
 
     private void processClass(DuringAnalysisAccessImpl access, Class<?> clazz) {
@@ -324,7 +327,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
 
     protected void afterAnalysis() {
         sealed = true;
-        if (modified) {
+        if (!modifiedClasses.isEmpty()) {
             throw UserError.abort("Registration of classes, methods, and fields for reflective access during analysis must set DuringAnalysisAccess.requireAnalysisIteration().");
         }
     }
@@ -440,7 +443,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
         private final Field declaredPublicFieldsField;
         private final Field declaredPublicMethodsField;
 
-        ReflectionDataAccessors(DuringSetupAccessImpl access) {
+        ReflectionDataAccessors(FeatureAccessImpl access) {
             reflectionDataMethod = ReflectionUtil.lookupMethod(Class.class, "reflectionData");
             Class<?> originalReflectionDataClass = access.getImageClassLoader().findClassOrFail("java.lang.Class$ReflectionData");
             declaredFieldsField = ReflectionUtil.lookupField(originalReflectionDataClass, "declaredFields");
