@@ -361,12 +361,6 @@ public class InvocationPlugins {
             plugins.register(plugin, false, allowOverwrite, declaringType, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
         }
 
-        /**
-         * Registers a plugin for a method with 8 arguments.
-         *
-         * @param name the name of the method
-         * @param plugin the plugin to be registered
-         */
         public void register8(String name, Type arg1, Type arg2, Type arg3, Type arg4, Type arg5, Type arg6, Type arg7, Type arg8, InvocationPlugin plugin) {
             plugins.register(plugin, false, allowOverwrite, declaringType, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
         }

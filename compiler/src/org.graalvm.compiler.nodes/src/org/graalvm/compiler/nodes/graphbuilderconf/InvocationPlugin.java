@@ -182,6 +182,9 @@ public interface InvocationPlugin extends GraphBuilderPlugin {
             } else if (argsIncludingReceiver.length == 7) {
                 return apply(b, targetMethod, receiver, argsIncludingReceiver[1], argsIncludingReceiver[2], argsIncludingReceiver[3], argsIncludingReceiver[4], argsIncludingReceiver[5],
                                 argsIncludingReceiver[6]);
+            } else if (argsIncludingReceiver.length == 8) {
+                return apply(b, targetMethod, receiver, argsIncludingReceiver[1], argsIncludingReceiver[2], argsIncludingReceiver[3], argsIncludingReceiver[4], argsIncludingReceiver[5],
+                                argsIncludingReceiver[6], argsIncludingReceiver[7]);
             } else {
                 return defaultHandler(b, targetMethod, receiver, argsIncludingReceiver);
             }
@@ -205,6 +208,9 @@ public interface InvocationPlugin extends GraphBuilderPlugin {
             } else if (argsIncludingReceiver.length == 7) {
                 return apply(b, targetMethod, null, argsIncludingReceiver[0], argsIncludingReceiver[1], argsIncludingReceiver[2], argsIncludingReceiver[3], argsIncludingReceiver[4],
                                 argsIncludingReceiver[5], argsIncludingReceiver[6]);
+            } else if (argsIncludingReceiver.length == 8) {
+                return apply(b, targetMethod, null, argsIncludingReceiver[0], argsIncludingReceiver[1], argsIncludingReceiver[2], argsIncludingReceiver[3], argsIncludingReceiver[4],
+                                argsIncludingReceiver[5], argsIncludingReceiver[6], argsIncludingReceiver[7]);
             } else {
                 return defaultHandler(b, targetMethod, receiver, argsIncludingReceiver);
             }

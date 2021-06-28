@@ -69,7 +69,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     @Temp({REG}) private Value aTempArrayAddressReg1Value;
 
     public GotoKernel8x8Op(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
-                                    Value i, Value k, Value j) {
+                                    Value i, Value k, Value j, Value calc) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);

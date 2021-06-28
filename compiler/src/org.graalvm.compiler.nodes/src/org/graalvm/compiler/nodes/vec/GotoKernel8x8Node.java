@@ -22,8 +22,9 @@ public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLow
     @Input ValueNode i;
     @Input ValueNode k;
     @Input ValueNode j;
+    @Input ValueNode calc;
 
-    public GotoKernel8x8Node(ValueNode a, ValueNode b, ValueNode result, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j) {
+    public GotoKernel8x8Node(ValueNode a, ValueNode b, ValueNode result, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode calc) {
         super(TYPE, StampFactory.forVoid());
         this.a = a;
         this.b = b;
@@ -32,11 +33,12 @@ public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLow
         this.i = i;
         this.k = k;
         this.j = j;
+        this.calc = calc;
     }
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
         gen.getLIRGeneratorTool().emitGotoKernel8x8(gen.operand(a), gen.operand(b), gen.operand(result), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j));
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), gen.operand(calc));
     }
 }
