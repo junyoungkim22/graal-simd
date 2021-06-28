@@ -142,6 +142,11 @@ public interface InvocationPlugin extends GraphBuilderPlugin {
         return defaultHandler(b, targetMethod, receiver, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
     }
 
+    default boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, InvocationPlugin.Receiver receiver, ValueNode arg1, ValueNode arg2, ValueNode arg3, ValueNode arg4, ValueNode arg5,
+                    ValueNode arg6, ValueNode arg7, ValueNode arg8) {
+        return defaultHandler(b, targetMethod, receiver, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+    }
+
     /**
      * Executes this plugin against a set of invocation arguments.
      *

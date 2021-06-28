@@ -88,6 +88,7 @@ import org.graalvm.compiler.nodes.vec.SimdDoubleFmaddNode;
 import org.graalvm.compiler.nodes.vec.MatmulKernel8x16Node;
 import org.graalvm.compiler.nodes.vec.MatmulKernel2x8Node;
 import org.graalvm.compiler.nodes.vec.MatmulKernel1D2x8Node;
+import org.graalvm.compiler.nodes.vec.GotoKernel8x8Node;
 import org.graalvm.compiler.nodes.virtual.EnsureVirtualizedNode;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.replacements.nodes.arithmetic.UnsignedMulHighNode;
@@ -472,6 +473,14 @@ public class TruffleGraphBuilderPlugins {
             public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode a, ValueNode bMat, ValueNode result, ValueNode constants,
                                     ValueNode i, ValueNode k, ValueNode j) {
                 b.add(new MatmulKernel1D2x8Node(a, bMat, result, constants, i, k, j));
+                return true;
+            }
+        });
+        r.register7("gotoKernel8x8", double[][].class, double[][].class, double[][].class, int.class, int.class, int.class, int.class, new InvocationPlugin() {
+            @Override
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode a, ValueNode bMat, ValueNode result, ValueNode kPanelSize,
+                                    ValueNode i, ValueNode k, ValueNode j) {
+                b.add(new GotoKernel8x8Node(a, bMat, result, kPanelSize, i, k, j));
                 return true;
             }
         });

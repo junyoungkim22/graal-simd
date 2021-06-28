@@ -347,6 +347,12 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
                                     Value i, Value k, Value j) {
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
+
+    @SuppressWarnings("unused")
+    default void emitGotoKernel8x8(Value a, Value b, Value result, Value kPanelSize,
+                                    Value i, Value k, Value j) {
+        throw GraalError.unimplemented("AMD64 specific instruction.");
+    }
     /**
      * Emits instruction(s) to flush an individual cache line that starts at {@code address}.
      */
