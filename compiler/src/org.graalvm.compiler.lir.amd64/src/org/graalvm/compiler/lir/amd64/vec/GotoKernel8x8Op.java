@@ -34,6 +34,8 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     private final int OBJECT_ARRAY_BASE_OFFSET;
     private final Scale OBJECT_ARRAY_INDEX_SCALE;
 
+    private final int calc;
+
     @Alive({REG}) private Value aValue;
     @Alive({REG}) private Value bValue;
     @Alive({REG}) private Value resultValue;
@@ -69,7 +71,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     @Temp({REG}) private Value aTempArrayAddressReg1Value;
 
     public GotoKernel8x8Op(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
-                                    Value i, Value k, Value j, Value calc) {
+                                    Value i, Value k, Value j, int calc) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -77,6 +79,8 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
 
         OBJECT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Object);
         OBJECT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Object)));
+
+        this.calc = calc;
 
         aValue = a;
         bValue = b;

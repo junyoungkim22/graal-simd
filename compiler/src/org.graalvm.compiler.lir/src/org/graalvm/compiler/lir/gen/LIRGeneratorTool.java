@@ -350,7 +350,7 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
 
     @SuppressWarnings("unused")
     default void emitGotoKernel8x8(Value a, Value b, Value result, Value kPanelSize,
-                                    Value i, Value k, Value j, Value calc) {
+                                    Value i, Value k, Value j, int calc) {
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
     /**

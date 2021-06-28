@@ -38,7 +38,8 @@ public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLow
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
+	int calcJavaConstant = calc.asJavaConstant().asInt();
         gen.getLIRGeneratorTool().emitGotoKernel8x8(gen.operand(a), gen.operand(b), gen.operand(result), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), gen.operand(calc));
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), calcJavaConstant);
     }
 }
