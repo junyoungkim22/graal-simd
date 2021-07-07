@@ -34,7 +34,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     private final int OBJECT_ARRAY_BASE_OFFSET;
     private final Scale OBJECT_ARRAY_INDEX_SCALE;
 
-    private final int calc;
+    private final long[] calcArr;
 
     @Alive({REG}) private Value aValue;
     @Alive({REG}) private Value bValue;
@@ -71,7 +71,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     @Temp({REG}) private Value aTempArrayAddressReg1Value;
 
     public GotoKernel8x8Op(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
-                                    Value i, Value k, Value j, int calc) {
+                                    Value i, Value k, Value j, long[] calc) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -80,7 +80,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         OBJECT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Object);
         OBJECT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Object)));
 
-        this.calc = calc;
+        this.calcArr = calc;
 
         aValue = a;
         bValue = b;
@@ -203,9 +203,11 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         aAddress = new AMD64Address(aTempArrayAddressReg1, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
         masm.movddup(aTempBroadcast1, aAddress);
 
-        masm.movdqu(temp, aTempBroadcast0);
-        masm.mulpd(temp, b0);
-        masm.addpd(c00, temp);
+        if(calcArr[0] == 3) {
+            masm.movdqu(temp, aTempBroadcast0);
+            masm.mulpd(temp, b0);
+            masm.addpd(c00, temp);
+        }
 
         masm.mulpd(b0, aTempBroadcast1);
         masm.addpd(c10, b0);
