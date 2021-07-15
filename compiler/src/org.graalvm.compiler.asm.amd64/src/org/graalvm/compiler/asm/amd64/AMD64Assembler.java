@@ -4889,6 +4889,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(dst, b, 0, EVEXTuple.FV_NO_BROADCAST_64BIT.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    // _mm512_add_pd
+    public final void vaddpd(Register dst, Register nds, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 58 /r
+        evexPrefix(dst, Register.None, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x58);
+        emitModRM(dst, src);
+    }
+
     // _mm512_fmadd_pd
     public final void vfmadd213pd(Register dst, Register a, Register b) {
         assert supports(CPUFeature.AVX512F);
@@ -4977,6 +4986,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
         emitByte(0x19);
         emitModRM(dst, src);
+    }
+
+    // vbroadcastsd
+    public final void vbroadcastsd(Register dst, AMD64Address src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W1 19 /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0x19);
+        emitOperandHelper(dst, src, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
     // _mm512_i32gather_epi32
