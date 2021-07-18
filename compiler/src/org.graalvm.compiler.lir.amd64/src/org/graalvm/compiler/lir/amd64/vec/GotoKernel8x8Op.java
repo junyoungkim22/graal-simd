@@ -3,7 +3,10 @@ package org.graalvm.compiler.lir.amd64.vec;
 import static jdk.vm.ci.amd64.AMD64.k0;
 import static jdk.vm.ci.amd64.AMD64.k1;
 import static jdk.vm.ci.code.ValueUtil.asRegister;
+import static jdk.vm.ci.code.ValueUtil.asStackSlot;
 import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.REG;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.STACK;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
 
 import java.util.Objects;
 
@@ -21,8 +24,11 @@ import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 
 import jdk.vm.ci.amd64.AMD64Kind;
 import jdk.vm.ci.code.Register;
+import jdk.vm.ci.code.StackSlot;
 import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.Value;
+
+import static jdk.vm.ci.amd64.AMD64.rsp;
 
 import static jdk.vm.ci.amd64.AMD64.xmm0;
 import static jdk.vm.ci.amd64.AMD64.xmm1;
@@ -56,6 +62,9 @@ import static jdk.vm.ci.amd64.AMD64.xmm28;
 import static jdk.vm.ci.amd64.AMD64.xmm29;
 import static jdk.vm.ci.amd64.AMD64.xmm30;
 import static jdk.vm.ci.amd64.AMD64.xmm31;
+import static jdk.vm.ci.amd64.AMD64.r15;
+import static jdk.vm.ci.amd64.AMD64.rsi;
+import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
 
 @Opcode("GOTOKERNEL8X8")
 public final class GotoKernel8x8Op extends AMD64LIRInstruction {
@@ -88,7 +97,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
 
     @Alive({REG}) private Value aValue;
     @Alive({REG}) private Value bValue;
-    @Alive({REG}) private Value resultValue;
+    @Use({REG}) private Value resultValue;
 
     @Temp({REG}) private Value kPanelSizeValue;
     @Temp({REG}) private Value iValue;
@@ -97,12 +106,12 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
 
     final int aLength;
     final int bLength;
+    final int remainingRegisterNum;
     final int aTempArrayAddressNumLimit;
 
     @Temp({REG}) private Value loopIndexValue;
-    @Temp({REG}) private Value loopEndValue;
     @Temp({REG}) private Value tempArrayAddressRegValue;
-    @Temp({REG}) private Value[] aTempArrayAddressRegValues;
+    @Temp({REG}) private Value[] remainingRegValues;
 
     public GotoKernel8x8Op(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
                                     Value i, Value k, Value j, long[] calc) {
@@ -127,14 +136,14 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         aLength = 12;
         bLength = 16/8;
 
-        aTempArrayAddressNumLimit = aLength < 4 ? aLength : 4;
+        remainingRegisterNum = 5;
+        aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+5;
 
         loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
-        loopEndValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
         tempArrayAddressRegValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
-        aTempArrayAddressRegValues = new Value[aTempArrayAddressNumLimit];
-        for(int index = 0; index < aTempArrayAddressNumLimit; index++) {
-            aTempArrayAddressRegValues[index] = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
+        remainingRegValues = new Value[remainingRegisterNum];
+        for(int index = 0; index < remainingRegisterNum; index++) {
+            remainingRegValues[index] = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
         }
     }
 
@@ -183,7 +192,39 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         Register aBroadcast = amd64Regs[registerIndex++];
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
-            aTempArrayAddressRegs[i] = asRegister(aTempArrayAddressRegValues[i]);
+            if(i < remainingRegisterNum) {
+                aTempArrayAddressRegs[i] = asRegister(remainingRegValues[i]);
+            }
+            else if(i == remainingRegisterNum) {
+                aTempArrayAddressRegs[i] = resultPtr;
+            }
+            else if(i == remainingRegisterNum+1) {
+                for(int j = 0; j < cpuRegisters.length; j++) {
+                    if(kPanelSize.name.equals(cpuRegisters[j].name)) {
+                        aTempArrayAddressRegs[i] = cpuRegisters[j];
+                        break;
+                    }
+                }
+            }
+            else if(i == remainingRegisterNum+2) {
+                aTempArrayAddressRegs[i] = r15;
+            }
+            else if(i == remainingRegisterNum+3) {
+                for(int j = 0; j < cpuRegisters.length; j++) {
+                    if(kPos.name.equals(cpuRegisters[j].name)) {
+                        aTempArrayAddressRegs[i] = cpuRegisters[j];
+                        break;
+                    }
+                }
+            }
+            else if(i == remainingRegisterNum+4) {
+                for(int j = 0; j < cpuRegisters.length; j++) {
+                    if(iPos.name.equals(cpuRegisters[j].name)) {
+                        aTempArrayAddressRegs[i] = cpuRegisters[j];
+                        break;
+                    }
+                }
+            }
         }
 
         Register bRegs[] = new Register[bLength];
@@ -203,7 +244,6 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         tempRegs[1] = amd64Regs[registerIndex++];
 
         Register loopIndex = asRegister(loopIndexValue);
-        Register loopEnd = asRegister(loopEndValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
 
         AMD64Address resultAddress, aAddress, bAddress;
@@ -216,16 +256,37 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
                 masm.vmovupd(cRegs[i][j], resultAddress);
             }
         }
+        masm.push(resultPtr);
 
+        // Push value of kpos to stack
+        masm.subq(rsp, 4);
+        masm.movl(new AMD64Address(rsp), kPos);
+
+        // Push value of r15 to stack
+        masm.push(r15);
+
+        // Push value of iPos to stack
+        masm.subq(rsp, 4);
+        masm.movl(new AMD64Address(rsp), iPos);
+
+        // Initialize loop index
+        masm.movl(loopIndex, kPos);
+        masm.addl(kPanelSize, kPos);
+        masm.subq(rsp, 4);
+        masm.movl(new AMD64Address(rsp), kPanelSize);
+
+        // Push Addresses of A that are not savable on a register on stack first, so register iPos can be pushed on stack last
+        int numOfAAddressOnStack = 0;
+        for(int i = aTempArrayAddressNumLimit; i < aLength; i++) {
+            aAddress = new AMD64Address(aPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+            masm.movq(tempArrayAddressReg, aAddress);
+            masm.push(tempArrayAddressReg);
+            numOfAAddressOnStack++;
+        }
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
             aAddress = new AMD64Address(aPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
             masm.movq(aTempArrayAddressRegs[i], aAddress);
         }
-
-        // Initialize loop index
-        masm.movl(loopIndex, kPos);
-        masm.movl(loopEnd, kPos);
-        masm.addl(loopEnd, kPanelSize);
 
         Label loopLabel = new Label();
 
@@ -245,7 +306,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
                 aAddress = new AMD64Address(aTempArrayAddressRegs[i], loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
             }
             else {
-                aAddress = new AMD64Address(aPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+                aAddress = new AMD64Address(rsp, (aLength-i-1)*8);
                 masm.movq(tempArrayAddressReg, aAddress);
                 aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET);
             }
@@ -264,9 +325,31 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
         }
 
         masm.addl(loopIndex, 1);
-        masm.cmpl(loopIndex, loopEnd);
+        masm.cmpl(loopIndex, new AMD64Address(rsp, numOfAAddressOnStack*8));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
 
+        for(int i = 0; i < numOfAAddressOnStack; i++) {
+            masm.pop(tempArrayAddressReg);
+        }
+
+        // Reset kPanelSize register to (kPanelSize + kPos)
+        masm.movl(kPanelSize, new AMD64Address(rsp));
+        masm.addq(rsp, 4);
+
+        // Restore iPos
+        masm.movl(iPos, new AMD64Address(rsp));
+        masm.addq(rsp, 4);
+
+        // Restore r15
+        masm.pop(r15);
+
+        // Restore kPos
+        masm.movl(kPos, new AMD64Address(rsp));
+        masm.addq(rsp, 4);
+        masm.subl(kPanelSize, kPos);
+
+        // Restore resultPtr
+        masm.pop(resultPtr);
         // Store partial results in result array
         for(int i = 0; i < aLength; i++) {
             resultAddress = new AMD64Address(resultPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
