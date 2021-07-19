@@ -65,6 +65,7 @@ import static jdk.vm.ci.amd64.AMD64.xmm31;
 import static jdk.vm.ci.amd64.AMD64.r15;
 import static jdk.vm.ci.amd64.AMD64.rsi;
 import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
+import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 
 @Opcode("GOTOKERNEL8X8")
 public final class GotoKernelOp extends AMD64LIRInstruction {
@@ -174,10 +175,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-        final Register[] amd64Regs = new Register[]{xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9,
-                                                    xmm10, xmm11, xmm12, xmm13, xmm14, xmm15, xmm16, xmm17, xmm18, xmm19,
-                                                    xmm20, xmm21, xmm22, xmm23, xmm24, xmm25, xmm26, xmm27, xmm28, xmm29,
-                                                    xmm30, xmm31};
         int registerIndex = 0;
 
         Register aPtr = asRegister(aValue);
@@ -189,7 +186,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register kPos = asRegister(kValue);
         Register jPos = asRegister(jValue);
 
-        Register aBroadcast = amd64Regs[registerIndex++];
+        Register aBroadcast = xmmRegistersAVX512[registerIndex++];
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
             if(i < remainingRegisterNum) {
@@ -229,19 +226,19 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         Register bRegs[] = new Register[bLength];
         for(int i = 0; i < bLength; i++) {
-            bRegs[i] = amd64Regs[registerIndex++];
+            bRegs[i] = xmmRegistersAVX512[registerIndex++];
         }
 
         Register cRegs[][] = new Register[aLength][bLength];
         for(int i = 0; i < aLength; i++) {
             for(int j = 0; j < bLength; j++) {
-                cRegs[i][j] = amd64Regs[registerIndex++];
+                cRegs[i][j] = xmmRegistersAVX512[registerIndex++];
             }
         }
 
         Register tempRegs[] = new Register[2];
-        tempRegs[0] = amd64Regs[registerIndex++];
-        tempRegs[1] = amd64Regs[registerIndex++];
+        tempRegs[0] = xmmRegistersAVX512[registerIndex++];
+        tempRegs[1] = xmmRegistersAVX512[registerIndex++];
 
         Register loopIndex = asRegister(loopIndexValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
