@@ -111,7 +111,7 @@ import org.graalvm.compiler.lir.amd64.vec.SimdDoubleFmaddOp;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel2x8Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel8x16Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel1D2x8Op;
-import org.graalvm.compiler.lir.amd64.vec.GotoKernel8x8Op;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernelOp;
 import org.graalvm.compiler.lir.amd64.vector.AMD64VectorCompareOp;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.lir.gen.LIRGenerator;
@@ -800,8 +800,8 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public void emitGotoKernel8x8(Value a, Value b, Value result, Value kPanelSize,
+    public void emitGotoKernel(Value a, Value b, Value result, Value kPanelSize,
                                     Value i, Value k, Value j, long[] calc) {
-        append(new GotoKernel8x8Op(this, a, b, result, kPanelSize, i, k, j, calc));
+        append(new GotoKernelOp(this, a, b, asAllocatable(result), kPanelSize, i, k, j, calc));
     }
 }

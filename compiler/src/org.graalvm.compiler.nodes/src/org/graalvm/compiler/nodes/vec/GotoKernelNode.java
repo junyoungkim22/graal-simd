@@ -12,8 +12,8 @@ import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 @NodeInfo(cycles = CYCLES_1, size = SIZE_1)
-public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLowerable {
-    public static final NodeClass<GotoKernel8x8Node> TYPE = NodeClass.create(GotoKernel8x8Node.class);
+public final class GotoKernelNode extends FixedWithNextNode implements LIRLowerable {
+    public static final NodeClass<GotoKernelNode> TYPE = NodeClass.create(GotoKernelNode.class);
 
     @Input ValueNode a;
     @Input ValueNode b;
@@ -24,7 +24,7 @@ public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLow
     @Input ValueNode j;
     @Input ValueNode calc;
 
-    public GotoKernel8x8Node(ValueNode a, ValueNode b, ValueNode result, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode calc) {
+    public GotoKernelNode(ValueNode a, ValueNode b, ValueNode result, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode calc) {
         super(TYPE, StampFactory.forVoid());
         this.a = a;
         this.b = b;
@@ -44,7 +44,7 @@ public final class GotoKernel8x8Node extends FixedWithNextNode implements LIRLow
 	    for(int i = 0; i < arrLen; i++) {
 	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(calc.asJavaConstant(), i).asLong();
 	    }
-        gen.getLIRGeneratorTool().emitGotoKernel8x8(gen.operand(a), gen.operand(b), gen.operand(result), gen.operand(kPanelSize),
+        gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(a), gen.operand(b), gen.operand(result), gen.operand(kPanelSize),
                                                         gen.operand(i), gen.operand(k), gen.operand(j), argLong);
     }
 }

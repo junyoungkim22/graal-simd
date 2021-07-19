@@ -67,8 +67,8 @@ import static jdk.vm.ci.amd64.AMD64.rsi;
 import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
 
 @Opcode("GOTOKERNEL8X8")
-public final class GotoKernel8x8Op extends AMD64LIRInstruction {
-    public static final LIRInstructionClass<GotoKernel8x8Op> TYPE = LIRInstructionClass.create(GotoKernel8x8Op.class);
+public final class GotoKernelOp extends AMD64LIRInstruction {
+    public static final LIRInstructionClass<GotoKernelOp> TYPE = LIRInstructionClass.create(GotoKernelOp.class);
 
     private final int DOUBLE_ARRAY_BASE_OFFSET;
     private final Scale DOUBLE_ARRAY_INDEX_SCALE;
@@ -113,7 +113,7 @@ public final class GotoKernel8x8Op extends AMD64LIRInstruction {
     @Temp({REG}) private Value tempArrayAddressRegValue;
     @Temp({REG}) private Value[] remainingRegValues;
 
-    public GotoKernel8x8Op(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
+    public GotoKernelOp(LIRGeneratorTool tool, Value a, Value b, Value result, Value kPanelSize,
                                     Value i, Value k, Value j, long[] calc) {
         super(TYPE);
 
