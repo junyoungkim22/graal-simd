@@ -67,9 +67,13 @@ import static jdk.vm.ci.amd64.AMD64.rsi;
 import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
 import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 
+import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
+
 @Opcode("GOTOKERNEL8X8")
 public final class GotoKernelOp extends AMD64LIRInstruction {
     public static final LIRInstructionClass<GotoKernelOp> TYPE = LIRInstructionClass.create(GotoKernelOp.class);
+
+
 
     private final int DOUBLE_ARRAY_BASE_OFFSET;
     private final Scale DOUBLE_ARRAY_INDEX_SCALE;
@@ -125,17 +129,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         this.calcArr = calc;
 
-        /*
-        aValue = a;
-        bValue = b;
-        resultValue = result;
-        */
         arrsValue = arrs;
         tempArrPtrValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
-        /*
-        bValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
-        resultValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
-        */
         kPanelSizeValue = kPanelSize;
         iValue = i;
         kValue = k;
@@ -156,11 +151,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     }
 
     public void emitOperation(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString, AMD64MacroAssembler masm, Register[] tempRegs) {
-        String op = opString.toString().substring(0, 3);
+        String op = opString.toString().substring(0, 4);
         // Assume that results are added to cReg (for the moment)
         //opString = opString.substring(3, opString.length());
-        opString.changeTo(opString.toString().substring(3, opString.toString().length()));
-        if(op.equals("001")) {  //Multiplication
+        opString.changeTo(opString.toString().substring(4, opString.toString().length()));
+        if(op.equals(GotoOpCode.MUL.toString())) {  //Multiplication
             Register lhs = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[0]);
             Register rhs = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[1]);
             masm.vfmadd231pd(cReg, lhs, rhs);
@@ -169,12 +164,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     }
 
     public Register getOperationRegister(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString, AMD64MacroAssembler masm, Register resultRegister) {
-        String op = opString.toString().substring(0, 3);
-        opString.changeTo(opString.toString().substring(3, opString.toString().length()));
-        if(op.equals("101")) {
+        String op = opString.toString().substring(0, 4);
+        opString.changeTo(opString.toString().substring(4, opString.toString().length()));
+        if(op.equals(GotoOpCode.A.toString())) {
             return aBroadcast;
         }
-        else if(op.equals("110")) {
+        else if(op.equals(GotoOpCode.B.toString())) {
             return bReg;
         }
         return resultRegister;
@@ -186,10 +181,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         Register arrsPtr = asRegister(arrsValue);
         Register tempArrPtr = asRegister(tempArrPtrValue);
-        /*
-        Register bPtr = asRegister(bValue);
-        Register resultPtr = asRegister(resultValue);
-        */
 
         Register kPanelSize = asRegister(kPanelSizeValue);
         Register iPos = asRegister(iValue);
