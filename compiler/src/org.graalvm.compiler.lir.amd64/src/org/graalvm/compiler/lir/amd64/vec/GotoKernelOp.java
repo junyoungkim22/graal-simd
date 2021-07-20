@@ -285,7 +285,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), iPos);
 
-        // Push value of b to stack
+        // Push pointer to B to stack
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
         masm.push(tempArrPtr);
 
@@ -298,9 +298,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // push arrsPtr to stack
         masm.push(arrsPtr);
 
-        // Load a
+        // Load A
         masm.movl(tempArrayAddressGeneralReg, 0);
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, tempArrayAddressGeneralReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
+
         // Push Addresses of A that are not savable on a register on stack first, so register iPos can be pushed on stack last
         int numOfAAddressOnStack = 0;
         for(int i = aTempArrayAddressNumLimit; i < aLength; i++) {
@@ -314,7 +315,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.movq(aTempArrayAddressRegs[i], aAddress);
         }
 
-        //Load pointer to B
+        //Load B
         masm.movq(tempArrPtr, new AMD64Address(rsp, (numOfAAddressOnStack*8)+8+4));
 
         Label loopLabel = new Label();
@@ -368,7 +369,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.movl(kPanelSize, new AMD64Address(rsp));
         masm.addq(rsp, 4);
 
-        // Pop b
+        // Pop B
         masm.pop(tempArrPtr);
 
         // Restore iPos
@@ -381,10 +382,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // Restore kPos
         masm.movl(kPos, new AMD64Address(rsp));
         masm.addq(rsp, 4);
+
+        // Restore original value of kPanelSize
         masm.subl(kPanelSize, kPos);
 
-        // Restore resultPtr
-        //masm.pop(resultPtr);
         masm.movl(loopIndex, 0);
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
         // Store partial results in result array
