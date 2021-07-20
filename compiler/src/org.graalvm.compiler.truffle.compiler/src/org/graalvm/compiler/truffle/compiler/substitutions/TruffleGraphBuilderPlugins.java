@@ -476,11 +476,11 @@ public class TruffleGraphBuilderPlugins {
                 return true;
             }
         });
-        r.register8("gotoKernel", double[][].class, double[][].class, double[][].class, int.class, int.class, int.class, int.class, long[].class, new InvocationPlugin() {
+        r.register6("gotoKernel", double[][][].class, int.class, int.class, int.class, int.class, long[].class, new InvocationPlugin() {
             @Override
-            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode a, ValueNode bMat, ValueNode result, ValueNode kPanelSize,
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode arrs, ValueNode kPanelSize,
                                     ValueNode i, ValueNode k, ValueNode j, ValueNode calc) {
-                b.add(new GotoKernelNode(a, bMat, result, kPanelSize, i, k, j, calc));
+                b.add(new GotoKernelNode(arrs, kPanelSize, i, k, j, calc));
                 return true;
             }
         });

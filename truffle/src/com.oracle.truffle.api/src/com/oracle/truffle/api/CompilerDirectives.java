@@ -613,7 +613,10 @@ public final class CompilerDirectives {
         }
     }
 
-    public static void gotoKernel(double[][] a, double[][] b, double[][] result, int kPanelSize, int i, int k, int j, long[] calc) {
+    public static void gotoKernel(double[][][] arrs, int kPanelSize, int i, int k, int j, long[] calc) {
+	double[][] a = arrs[0];
+	double[][] b = arrs[1];
+	double[][] result = arrs[2];
         for(int kk = k; kk < k+kPanelSize; kk++) {
             for(int ii = i; ii < i+12; ii++) {
                 for(int jj = j; jj < j+16; jj++) {

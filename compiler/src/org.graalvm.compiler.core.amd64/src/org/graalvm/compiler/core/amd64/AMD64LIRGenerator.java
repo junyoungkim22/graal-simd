@@ -800,8 +800,8 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     }
 
     @Override
-    public void emitGotoKernel(Value a, Value b, Value result, Value kPanelSize,
+    public void emitGotoKernel(Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, long[] calc) {
-        append(new GotoKernelOp(this, a, b, asAllocatable(result), kPanelSize, i, k, j, calc));
+        append(new GotoKernelOp(this, arrs, kPanelSize, i, k, j, calc));
     }
 }
