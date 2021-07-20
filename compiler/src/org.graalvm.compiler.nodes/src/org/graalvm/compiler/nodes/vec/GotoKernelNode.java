@@ -25,9 +25,9 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
     @Input ValueNode i;
     @Input ValueNode k;
     @Input ValueNode j;
-    @Input ValueNode calc;
+    @Input ValueNode constArgs;
 
-    public GotoKernelNode(ValueNode arrs, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode calc) {
+    public GotoKernelNode(ValueNode arrs, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode constArgs) {
         super(TYPE, StampFactory.forVoid());
         /*
         this.a = a;
@@ -39,18 +39,20 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
         this.i = i;
         this.k = k;
         this.j = j;
-        this.calc = calc;
+        this.constArgs = constArgs;
     }
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
 	    //int calcJavaConstant = calc.asJavaConstant().asInt();
-	    int arrLen = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayLength(calc.asJavaConstant());
-	    long[] argLong = new long[arrLen];
-	    for(int i = 0; i < arrLen; i++) {
-	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(calc.asJavaConstant(), i).asLong();
+	    int arrLen = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayLength(constArgs.asJavaConstant());
+	    int aLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 0).asLong();
+	    int bLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 1).asLong();
+	    long[] argLong = new long[arrLen-2];
+	    for(int i = 0; i < argLong.length; i++) {
+	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+2).asLong();
 	    }
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), argLong);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong);
     }
 }

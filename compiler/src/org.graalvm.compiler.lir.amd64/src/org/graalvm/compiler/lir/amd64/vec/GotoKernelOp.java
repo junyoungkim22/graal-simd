@@ -114,7 +114,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value[] remainingRegValues;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, long[] calc) {
+                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -141,8 +141,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         kValue = k;
         jValue = j;
 
-        aLength = 12;
-        bLength = 16/8;
+        this.aLength = aLength;
+        this.bLength = bLength/8;
 
         remainingRegisterNum = 6;
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+5;
