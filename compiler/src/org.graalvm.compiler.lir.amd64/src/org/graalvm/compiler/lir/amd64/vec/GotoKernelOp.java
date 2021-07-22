@@ -271,15 +271,21 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         // Push value of kpos to stack
+        masm.push(kPos);
+        /*
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), kPos);
+        */
 
         // Push value of r15 to stack
         masm.push(r15);
 
         // Push value of iPos to stack
+        /*
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), iPos);
+        */
+        masm.push(iPos);
 
         // Push pointer to B to stack
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
@@ -369,15 +375,21 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.pop(tempArrPtr);
 
         // Restore iPos
+        /*
         masm.movl(iPos, new AMD64Address(rsp));
         masm.addq(rsp, 4);
+        */
+        masm.pop(iPos);
 
         // Restore r15
         masm.pop(r15);
 
         // Restore kPos
+        /*
         masm.movl(kPos, new AMD64Address(rsp));
         masm.addq(rsp, 4);
+        */
+        masm.pop(kPos);
 
         // Restore original value of kPanelSize
         masm.subl(kPanelSize, kPos);
