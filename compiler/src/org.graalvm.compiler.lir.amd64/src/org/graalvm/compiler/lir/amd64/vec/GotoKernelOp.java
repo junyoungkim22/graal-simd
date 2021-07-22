@@ -112,7 +112,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     final int aLength;
     final int bLength;
     final int remainingRegisterNum;
-    final int aTempArrayAddressNumLimit;
+    //final int aTempArrayAddressNumLimit;
 
     @Temp({REG}) private Value loopIndexValue;
     @Temp({REG}) private Value tempArrayAddressRegValue;
@@ -142,7 +142,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.bLength = bLength/8;
 
         remainingRegisterNum = 6;
-        aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+5;
+        //aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+5;
 
         loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
         tempArrayAddressRegValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
@@ -150,6 +150,15 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         for(int index = 0; index < remainingRegisterNum; index++) {
             remainingRegValues[index] = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
         }
+    }
+
+    private static Register findRegister(Register toFind, Register[] registerArray) {
+        for(int i = 0; i < registerArray.length; i++) {
+            if(toFind.name.equals(registerArray[i].name)) {
+                return registerArray[i];
+            }
+        }
+        return null;
     }
 
     public void emitOperation(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString, AMD64MacroAssembler masm, Register[] tempRegs) {
@@ -209,40 +218,15 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register jPos = asRegister(jValue);
 
         Register aBroadcast = xmmRegistersAVX512[registerIndex++];
+        Register useAsAddressRegs[] = new Register[]{arrsPtr, kPanelSize, r15, kPos, iPos};
+        int aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
             if(i < remainingRegisterNum) {
                 aTempArrayAddressRegs[i] = asRegister(remainingRegValues[i]);
             }
-            else if(i == remainingRegisterNum) {
-                aTempArrayAddressRegs[i] = arrsPtr;
-            }
-            else if(i == remainingRegisterNum+1) {
-                for(int j = 0; j < cpuRegisters.length; j++) {
-                    if(kPanelSize.name.equals(cpuRegisters[j].name)) {
-                        aTempArrayAddressRegs[i] = cpuRegisters[j];
-                        break;
-                    }
-                }
-            }
-            else if(i == remainingRegisterNum+2) {
-                aTempArrayAddressRegs[i] = r15;
-            }
-            else if(i == remainingRegisterNum+3) {
-                for(int j = 0; j < cpuRegisters.length; j++) {
-                    if(kPos.name.equals(cpuRegisters[j].name)) {
-                        aTempArrayAddressRegs[i] = cpuRegisters[j];
-                        break;
-                    }
-                }
-            }
-            else if(i == remainingRegisterNum+4) {
-                for(int j = 0; j < cpuRegisters.length; j++) {
-                    if(iPos.name.equals(cpuRegisters[j].name)) {
-                        aTempArrayAddressRegs[i] = cpuRegisters[j];
-                        break;
-                    }
-                }
+            else {
+                aTempArrayAddressRegs[i] = findRegister(useAsAddressRegs[i-remainingRegisterNum], cpuRegisters);
             }
         }
 
@@ -285,7 +269,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 masm.vmovupd(cRegs[i][j], resultAddress);
             }
         }
-        
+
         // Push value of kpos to stack
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), kPos);
