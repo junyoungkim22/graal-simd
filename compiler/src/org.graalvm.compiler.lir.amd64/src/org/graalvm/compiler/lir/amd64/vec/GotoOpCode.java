@@ -4,7 +4,8 @@ public enum GotoOpCode {
     MUL("0000"),
     ADD("0002342341"),
     A("1000"),
-    B("1001")
+    B("1001"),
+    CONSTARG("1010")
     ;
 
     private final String text;

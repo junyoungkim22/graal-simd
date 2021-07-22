@@ -82,6 +82,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private final Scale OBJECT_ARRAY_INDEX_SCALE;
 
     private final long[] calcArr;
+    private final double[] constArgs;
 
     class ChangeableString {
         private String str;
@@ -118,7 +119,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value[] remainingRegValues;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc) {
+                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -128,6 +129,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         OBJECT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Object)));
 
         this.calcArr = calc;
+        this.constArgs = constArgs;
 
         arrsValue = arrs;
         tempArrPtrValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
@@ -160,6 +162,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             Register rhs = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[1]);
             masm.vfmadd231pd(cReg, lhs, rhs);
         }
+        else {
+            Register arg = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[0]);
+            masm.vaddpd(cReg, cReg, arg);
+        }
 
     }
 
@@ -171,6 +177,21 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
         else if(op.equals(GotoOpCode.B.toString())) {
             return bReg;
+        }
+        else if(op.equals(GotoOpCode.CONSTARG.toString())) {
+
+            int argIndex = Integer.parseInt(opString.toString().substring(0, 4), 2);
+            opString.changeTo(opString.toString().substring(4, opString.toString().length()));
+            masm.push(r15);
+            masm.movq(r15, Double.doubleToLongBits(constArgs[argIndex]));
+            //masm.movq(r15, Double.doubleToLongBits(test));
+            masm.push(r15);
+            masm.vbroadcastsd(resultRegister, new AMD64Address(rsp));
+            masm.pop(r15);
+            masm.pop(r15);
+            return resultRegister;
+
+            //return aBroadcast;
         }
         return resultRegister;
     }
@@ -264,7 +285,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 masm.vmovupd(cRegs[i][j], resultAddress);
             }
         }
-
+        
         // Push value of kpos to stack
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), kPos);

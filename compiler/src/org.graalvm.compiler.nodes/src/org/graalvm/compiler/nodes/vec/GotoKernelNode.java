@@ -15,11 +15,6 @@ import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 public final class GotoKernelNode extends FixedWithNextNode implements LIRLowerable {
     public static final NodeClass<GotoKernelNode> TYPE = NodeClass.create(GotoKernelNode.class);
 
-    /*
-    @Input ValueNode a;
-    @Input ValueNode b;
-    @Input ValueNode result;
-    */
     @Input ValueNode arrs;
     @Input ValueNode kPanelSize;
     @Input ValueNode i;
@@ -29,11 +24,6 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 
     public GotoKernelNode(ValueNode arrs, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j, ValueNode constArgs) {
         super(TYPE, StampFactory.forVoid());
-        /*
-        this.a = a;
-        this.b = b;
-        this.result = result;
-        */
         this.arrs = arrs;
         this.kPanelSize = kPanelSize;
         this.i = i;
@@ -48,11 +38,16 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    int arrLen = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayLength(constArgs.asJavaConstant());
 	    int aLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 0).asLong();
 	    int bLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 1).asLong();
-	    long[] argLong = new long[arrLen-2];
+	    int numLongsInOpString = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 2).asLong();
+	    long[] argLong = new long[numLongsInOpString];
 	    for(int i = 0; i < argLong.length; i++) {
-	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+2).asLong();
+	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+3).asLong();
+	    }
+	    double[] constDoubleArgs = new double[arrLen-3-numLongsInOpString];
+	    for(int i = 0; i < constDoubleArgs.length; i++) {
+	        constDoubleArgs[i] = (double) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+3+numLongsInOpString).asLong();
 	    }
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong, constDoubleArgs);
     }
 }
