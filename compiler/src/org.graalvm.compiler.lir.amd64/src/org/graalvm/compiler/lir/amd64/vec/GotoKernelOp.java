@@ -221,6 +221,13 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         // Make sure that iPos is last!
         Register useAsAddressRegs[] = new Register[]{arrsPtr, kPos, r15, kPanelSize, iPos};
+        int kPanelSizeIndexFromBehind = 0;
+        for(int i = 0; i < useAsAddressRegs.length; i++) {
+            if(useAsAddressRegs[i] == kPanelSize) {
+                kPanelSizeIndexFromBehind = i;
+            }
+        }
+        kPanelSizeIndexFromBehind = useAsAddressRegs.length - kPanelSizeIndexFromBehind - 1;
 
         int aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
@@ -339,7 +346,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         masm.addl(loopIndex, 1);
-        masm.cmpl(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+8+8));
+        masm.cmpl(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+8+(8*kPanelSizeIndexFromBehind)));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
 
         for(int i = 0; i < numOfAAddressOnStack; i++) {
