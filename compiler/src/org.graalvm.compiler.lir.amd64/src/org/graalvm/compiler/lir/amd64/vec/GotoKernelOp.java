@@ -272,19 +272,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         // Push value of kpos to stack
         masm.push(kPos);
-        /*
-        masm.subq(rsp, 4);
-        masm.movl(new AMD64Address(rsp), kPos);
-        */
 
         // Push value of r15 to stack
         masm.push(r15);
 
         // Push value of iPos to stack
-        /*
-        masm.subq(rsp, 4);
-        masm.movl(new AMD64Address(rsp), iPos);
-        */
         masm.push(iPos);
 
         // Push pointer to B to stack
@@ -294,8 +286,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // Initialize loop index + push kPanelSize to stack
         masm.movl(loopIndex, kPos);
         masm.addl(kPanelSize, kPos);
+        /*
         masm.subq(rsp, 4);
         masm.movl(new AMD64Address(rsp), kPanelSize);
+        */
+        masm.push(kPanelSize);
 
         // push arrsPtr to stack
         masm.push(arrsPtr);
@@ -318,7 +313,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         //Load B
-        masm.movq(tempArrPtr, new AMD64Address(rsp, (numOfAAddressOnStack*8)+8+4));
+        masm.movq(tempArrPtr, new AMD64Address(rsp, (numOfAAddressOnStack*8)+8+8));
 
         Label loopLabel = new Label();
 
@@ -368,27 +363,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.pop(arrsPtr);
 
         // Reset kPanelSize register to (kPanelSize + kPos)
-        masm.movl(kPanelSize, new AMD64Address(rsp));
-        masm.addq(rsp, 4);
+        masm.pop(kPanelSize);
 
         // Pop B
         masm.pop(tempArrPtr);
 
         // Restore iPos
-        /*
-        masm.movl(iPos, new AMD64Address(rsp));
-        masm.addq(rsp, 4);
-        */
         masm.pop(iPos);
 
         // Restore r15
         masm.pop(r15);
 
         // Restore kPos
-        /*
-        masm.movl(kPos, new AMD64Address(rsp));
-        masm.addq(rsp, 4);
-        */
         masm.pop(kPos);
 
         // Restore original value of kPanelSize
