@@ -220,8 +220,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register aBroadcast = xmmRegistersAVX512[registerIndex++];
 
         // Make sure that iPos is last!
-        Register useAsAddressRegs[] = new Register[]{arrsPtr, kPanelSize, r15, kPos, iPos};
-        
+        Register useAsAddressRegs[] = new Register[]{arrsPtr, kPos, r15, kPanelSize, iPos};
+
         int aTempArrayAddressNumLimit = aLength < remainingRegisterNum ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
@@ -251,13 +251,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         Register loopIndex = asRegister(loopIndexValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
-        Register tempArrayAddressGeneralReg = null;
-        for(int i = 0; i < cpuRegisters.length; i++) {
-            if(tempArrayAddressReg.name.equals(cpuRegisters[i].name)) {
-                tempArrayAddressGeneralReg = cpuRegisters[i];
-                break;
-            }
-        }
+        Register tempArrayAddressGeneralReg = findRegister(tempArrayAddressReg, cpuRegisters);
 
         AMD64Address resultAddress, aAddress, bAddress;
 
@@ -280,20 +274,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.movl(loopIndex, kPos);
         masm.addl(kPanelSize, kPos);
 
-        // Push value of kpos to stack
-        masm.push(kPos);
-
-        // Push value of r15 to stack
-        masm.push(r15);
-
-        // Push value of iPos to stack
-        masm.push(iPos);
-
-        // Push value of kPanelSize of stack
-        masm.push(kPanelSize);
-
-        // push arrsPtr to stack
-        masm.push(arrsPtr);
+        // Push registers to be used for storing addresses of A on stack
+        for(int i = 0; i < useAsAddressRegs.length; i++) {
+            masm.push(useAsAddressRegs[i]);
+        }
 
         // push pointer to B to stack
         masm.push(tempArrPtr);
@@ -365,26 +349,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // Pop B
         masm.pop(tempArrPtr);
 
-        // Restore arrsPtr
-        masm.pop(arrsPtr);
-
-        // Reset kPanelSize register to (kPanelSize + kPos)
-        masm.pop(kPanelSize);
-
-        // Restore iPos
-        masm.pop(iPos);
-
-        // Restore r15
-        masm.pop(r15);
-
-        // Restore kPos
-        masm.pop(kPos);
+        // Restore registers pushed to stack
+        for(int i = useAsAddressRegs.length-1; i >=0; i--) {
+            masm.pop(useAsAddressRegs[i]);
+        }
 
         // Restore original value of kPanelSize
         masm.subl(kPanelSize, kPos);
 
+        // Get pointer to result array
         masm.movl(loopIndex, 0);
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
+
         // Store partial results in result array
         for(int i = 0; i < aLength; i++) {
             resultAddress = new AMD64Address(tempArrPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
