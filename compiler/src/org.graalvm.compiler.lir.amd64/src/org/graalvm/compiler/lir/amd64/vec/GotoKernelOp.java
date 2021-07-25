@@ -9,6 +9,8 @@ import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.STACK;
 import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
 
 import java.util.Objects;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.amd64.AMD64Address;
@@ -120,34 +122,81 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
     }
 
+    private static Boolean registerEquals(Register a, Register b) {
+        return a.name.equals(b.name);
+    }
+
     private static Register findRegister(Register toFind, Register[] registerArray) {
         for(int i = 0; i < registerArray.length; i++) {
-            if(toFind.name.equals(registerArray[i].name)) {
+            if(registerEquals(toFind, registerArray[i])) {
                 return registerArray[i];
             }
         }
         return null;
     }
 
+    private void pushIfNotAvailable(Register toPush, Map<String, Register> availableValues, AMD64MacroAssembler masm) {
+        if(availableValues.containsValue(toPush)) {
+            return;
+        }
+        masm.subq(rsp, 64);
+        masm.vmovupd(new AMD64Address(rsp), toPush);
+        this.stackOffsetToConstArgs += 64;
+    }
+
+    private void popIfNotAvailable(Register toPush, Map<String, Register> availableValues, AMD64MacroAssembler masm) {
+        if(availableValues.containsValue(toPush)) {
+            return;
+        }
+        masm.vmovupd(toPush, new AMD64Address(rsp));
+        masm.addq(rsp, 64);
+        this.stackOffsetToConstArgs -= 64;
+    }
+
     // Emit operation corresponding to opString, store in resultRegister (if applicable), and return SIMD register containing result
-    public Register emitOperation(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString,
+    public Register emitOperation(Map<String, Register> availableValues, ChangeableString opString,
                         AMD64MacroAssembler masm, Register[] tempRegs, Register resultRegister) {
         String op = opString.cutOff(4);
         if(op.equals(GotoOpCode.FMADD.toString())) {
-            Register fmaddResultReg = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, resultRegister);
-            Register mulLhs = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, tempRegs[0]);
-            Register mulRhs = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, tempRegs[1]);
+            Register fmaddResultReg = emitOperation(availableValues, opString, masm, tempRegs, resultRegister);
+            pushIfNotAvailable(fmaddResultReg, availableValues, masm);
+
+            Register tempReg0 = null;
+            for(Register reg : tempRegs) {
+                if(!registerEquals(reg, fmaddResultReg)) {
+                    tempReg0 = reg;
+                    break;
+                }
+            }
+            Register mulLhs = emitOperation(availableValues, opString, masm, tempRegs, tempReg0);
+            pushIfNotAvailable(mulLhs, availableValues, masm);
+
+            Register tempReg1 = null;
+            for(Register reg : tempRegs) {
+                if(!registerEquals(reg, fmaddResultReg) && !registerEquals(reg, tempReg0)) {
+                    tempReg1 = reg;
+                    break;
+                }
+            }
+            Register mulRhs = emitOperation(availableValues, opString, masm, tempRegs, tempReg1);
+
+            popIfNotAvailable(mulLhs, availableValues, masm);
+            popIfNotAvailable(fmaddResultReg, availableValues, masm);
+
             masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
             return fmaddResultReg;
         }
         else if(op.equals(GotoOpCode.A.toString())) {
-            return aBroadcast;
+            return availableValues.get("aBroadcast");
+            //return aBroadcast;
         }
         else if(op.equals(GotoOpCode.B.toString())) {
-            return bReg;
+            return availableValues.get("bReg");
+            //return bReg;
         }
         else if(op.equals(GotoOpCode.C.toString())) {
-            return cReg;
+            return availableValues.get("cReg");
+            //return cReg;
         }
         return resultRegister;
     }
@@ -198,9 +247,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
-        Register tempRegs[] = new Register[2];
+        Register tempRegs[] = new Register[3];
         tempRegs[0] = xmmRegistersAVX512[registerIndex++];
         tempRegs[1] = xmmRegistersAVX512[registerIndex++];
+        tempRegs[2] = xmmRegistersAVX512[registerIndex++];
+
+        Map<String, Register> availableValues = new HashMap<String, Register>();
 
         Register loopIndex = asRegister(loopIndexValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
@@ -289,8 +341,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 String opStringRaw = Long.toBinaryString(calcArr[0]);
                 opStringRaw = opStringRaw.substring(1, opStringRaw.length());  //Remove first digit (which is 1)
                 ChangeableString opString = new ChangeableString(opStringRaw);
-                //emitOperation(cRegs[i][j], aBroadcast, bRegs[j], opString, masm, tempRegs);
-                emitOperation(cRegs[i][j], aBroadcast, bRegs[j], opString, masm, tempRegs, cRegs[i][j]);
+                availableValues.put("cReg", cRegs[i][j]);
+                availableValues.put("aBroadcast", aBroadcast);
+                availableValues.put("bReg", bRegs[j]);
+                emitOperation(availableValues, opString, masm, tempRegs, cRegs[i][j]);
             }
         }
 
