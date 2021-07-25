@@ -58,15 +58,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             this.str = str;
         }
 
-        public void changeTo(String newStr) {
-            String s = newStr;
-            this.str = s;
-        }
-
         public String cutOff(int length) {
             String ret = str.substring(0, length);
-            //String newStr = str.substring(length, str.length());
-            //this.str = newStr;
             this.str = str.substring(length, str.length());
             return ret;
         }
@@ -136,39 +129,25 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         return null;
     }
 
-    public void emitOperation(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString, AMD64MacroAssembler masm, Register[] tempRegs) {
-        // Assume that results are added to cReg (for the moment)
-        /*
-        String op = opString.toString().substring(0, 4);
-        opString.changeTo(opString.toString().substring(4, opString.toString().length()));
-        */
+    // Emit operation corresponding to opString, store in resultRegister (if applicable), and return SIMD register containing result
+    public Register emitOperation(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString,
+                        AMD64MacroAssembler masm, Register[] tempRegs, Register resultRegister) {
         String op = opString.cutOff(4);
-        if(op.equals(GotoOpCode.MUL.toString())) {  //Multiplication
-            Register lhs = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[0]);
-            Register rhs = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[1]);
-            masm.vfmadd231pd(cReg, lhs, rhs);
+        if(op.equals(GotoOpCode.FMADD.toString())) {
+            Register fmaddResultReg = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, resultRegister);
+            Register mulLhs = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, tempRegs[0]);
+            Register mulRhs = emitOperation(cReg, aBroadcast, bReg, opString, masm, tempRegs, tempRegs[1]);
+            masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
+            return fmaddResultReg;
         }
-        else {
-            Register arg = getOperationRegister(cReg, aBroadcast, bReg, opString, masm, tempRegs[0]);
-            masm.vaddpd(cReg, cReg, arg);
-        }
-
-    }
-
-    public Register getOperationRegister(Register cReg, Register aBroadcast, Register bReg, ChangeableString opString, AMD64MacroAssembler masm, Register resultRegister) {
-        String op = opString.toString().substring(0, 4);
-        opString.changeTo(opString.toString().substring(4, opString.toString().length()));
-        if(op.equals(GotoOpCode.A.toString())) {
+        else if(op.equals(GotoOpCode.A.toString())) {
             return aBroadcast;
         }
         else if(op.equals(GotoOpCode.B.toString())) {
             return bReg;
         }
-        else if(op.equals(GotoOpCode.CONSTARG.toString())) {
-            int argIndex = Integer.parseInt(opString.toString().substring(0, 4), 2);
-            opString.changeTo(opString.toString().substring(4, opString.toString().length()));
-            masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
-            return resultRegister;
+        else if(op.equals(GotoOpCode.C.toString())) {
+            return cReg;
         }
         return resultRegister;
     }
@@ -310,7 +289,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 String opStringRaw = Long.toBinaryString(calcArr[0]);
                 opStringRaw = opStringRaw.substring(1, opStringRaw.length());  //Remove first digit (which is 1)
                 ChangeableString opString = new ChangeableString(opStringRaw);
-                emitOperation(cRegs[i][j], aBroadcast, bRegs[j], opString, masm, tempRegs);
+                //emitOperation(cRegs[i][j], aBroadcast, bRegs[j], opString, masm, tempRegs);
+                emitOperation(cRegs[i][j], aBroadcast, bRegs[j], opString, masm, tempRegs, cRegs[i][j]);
             }
         }
 
