@@ -186,17 +186,27 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
             return fmaddResultReg;
         }
+        else if(op.equals(GotoOpCode.ADD.toString())) {
+            Register lhs = emitOperation(availableValues, opString, masm, tempRegs, tempRegs[0]);
+            pushIfNotAvailable(lhs, availableValues, masm);
+            Register rhs = emitOperation(availableValues, opString, masm, tempRegs, tempRegs[1]);
+            popIfNotAvailable(lhs, availableValues, masm);
+            masm.vaddpd(resultRegister, lhs, rhs);
+            return resultRegister;
+        }
         else if(op.equals(GotoOpCode.A.toString())) {
             return availableValues.get("aBroadcast");
-            //return aBroadcast;
         }
         else if(op.equals(GotoOpCode.B.toString())) {
             return availableValues.get("bReg");
-            //return bReg;
         }
         else if(op.equals(GotoOpCode.C.toString())) {
             return availableValues.get("cReg");
-            //return cReg;
+        }
+        else if(op.equals(GotoOpCode.CONSTARG.toString())) {
+            int argIndex = Integer.parseInt(opString.cutOff(4), 2);
+            masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
+            return resultRegister;
         }
         return resultRegister;
     }
