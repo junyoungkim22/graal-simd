@@ -4826,6 +4826,16 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitByte(imm8);
     }
 
+    public final void vcmppd(Register kdst, Register nds, Register src, int imm8) {
+        assert supports(CPUFeature.AVX512F);
+        assert inRC(MASK, kdst);
+        // Code: EVEX.512.66.0F.W1 C2  /r
+        evexPrefix(kdst, Register.None, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0xC2);
+        emitModRM(kdst, src);
+        emitByte(imm8);
+    }
+
     // _mm512_loadu_epi32
     public final void vmovdqu32(Register dst, AMD64Address src) {
         assert supports(CPUFeature.AVX512F);
@@ -4894,6 +4904,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         assert supports(CPUFeature.AVX512F);
         // Code: EVEX.512.66.0F.W1 58 /r
         evexPrefix(dst, Register.None, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x58);
+        emitModRM(dst, src);
+    }
+
+    // _mm512_add_pd with mask (Z0 so that values in dst are untouched if mask is 0)
+    public final void vaddpd(Register dst, Register nds, Register src, Register mask) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 58 /r
+        evexPrefix(dst, mask, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
         emitByte(0x58);
         emitModRM(dst, src);
     }

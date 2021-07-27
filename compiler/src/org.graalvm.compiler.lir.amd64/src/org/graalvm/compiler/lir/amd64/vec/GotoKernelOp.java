@@ -17,6 +17,7 @@ import org.graalvm.compiler.asm.amd64.AMD64Address;
 import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
 import org.graalvm.compiler.asm.amd64.AMD64Assembler;
 import org.graalvm.compiler.asm.amd64.AMD64MacroAssembler;
+import org.graalvm.compiler.asm.amd64.AVXKind.AVXSize;
 import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.lir.LIRInstructionClass;
 import org.graalvm.compiler.lir.Opcode;
@@ -42,7 +43,7 @@ import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
 public final class GotoKernelOp extends AMD64LIRInstruction {
     public static final LIRInstructionClass<GotoKernelOp> TYPE = LIRInstructionClass.create(GotoKernelOp.class);
 
-
+    private static int opLength = 5;
 
     private final int DOUBLE_ARRAY_BASE_OFFSET;
     private final Scale DOUBLE_ARRAY_INDEX_SCALE;
@@ -88,6 +89,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value loopIndexValue;
     @Temp({REG}) private Value tempArrayAddressRegValue;
     @Temp({REG}) private Value[] remainingRegValues;
+
+    Register[] tempRegs;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs) {
@@ -155,10 +158,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
     // Emit operation corresponding to opString, store in resultRegister (if applicable), and return SIMD register containing result
     public Register emitOperation(Map<String, Register> availableValues, ChangeableString opString,
-                        AMD64MacroAssembler masm, Register[] tempRegs, Register resultRegister) {
-        String op = opString.cutOff(4);
+                        AMD64MacroAssembler masm, Register resultRegister) {
+        String op = opString.cutOff(opLength);
         if(op.equals(GotoOpCode.FMADD.toString())) {
-            Register fmaddResultReg = emitOperation(availableValues, opString, masm, tempRegs, resultRegister);
+            Register fmaddResultReg = emitOperation(availableValues, opString, masm, resultRegister);
             pushIfNotAvailable(fmaddResultReg, availableValues, masm);
 
             Register tempReg0 = null;
@@ -168,7 +171,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     break;
                 }
             }
-            Register mulLhs = emitOperation(availableValues, opString, masm, tempRegs, tempReg0);
+            Register mulLhs = emitOperation(availableValues, opString, masm, tempReg0);
             pushIfNotAvailable(mulLhs, availableValues, masm);
 
             Register tempReg1 = null;
@@ -178,7 +181,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     break;
                 }
             }
-            Register mulRhs = emitOperation(availableValues, opString, masm, tempRegs, tempReg1);
+            Register mulRhs = emitOperation(availableValues, opString, masm, tempReg1);
 
             popIfNotAvailable(mulLhs, availableValues, masm);
             popIfNotAvailable(fmaddResultReg, availableValues, masm);
@@ -186,12 +189,29 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
             return fmaddResultReg;
         }
-        else if(op.equals(GotoOpCode.ADD.toString())) {
-            Register lhs = emitOperation(availableValues, opString, masm, tempRegs, tempRegs[0]);
+        else if(op.equals(GotoOpCode.ADD.toString())) { // Todo: Make this conditional include other operations
+            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
-            Register rhs = emitOperation(availableValues, opString, masm, tempRegs, tempRegs[1]);
+            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
             popIfNotAvailable(lhs, availableValues, masm);
             masm.vaddpd(resultRegister, lhs, rhs);
+            return resultRegister;
+        }
+        else if(op.equals(GotoOpCode.MASKADD.toString())) { // Todo: Make this conditional include other operations
+            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
+            pushIfNotAvailable(lhs, availableValues, masm);
+            Register mask = emitOperation(availableValues, opString, masm, k1);
+            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
+            popIfNotAvailable(lhs, availableValues, masm);
+            masm.vaddpd(resultRegister, lhs, rhs, mask);
+            return resultRegister;
+        }
+        else if(op.equals(GotoOpCode.LT.toString())) {
+            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
+            pushIfNotAvailable(lhs, availableValues, masm);
+            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
+            popIfNotAvailable(lhs, availableValues, masm);
+            masm.vcmppd(resultRegister, lhs, rhs, 1);
             return resultRegister;
         }
         else if(op.equals(GotoOpCode.A.toString())) {
@@ -204,7 +224,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             return availableValues.get("cReg");
         }
         else if(op.equals(GotoOpCode.CONSTARG.toString())) {
-            int argIndex = Integer.parseInt(opString.cutOff(4), 2);
+            int argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
             masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
             return resultRegister;
         }
@@ -257,7 +277,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
-        Register tempRegs[] = new Register[3];
+        tempRegs = new Register[3];
         tempRegs[0] = xmmRegistersAVX512[registerIndex++];
         tempRegs[1] = xmmRegistersAVX512[registerIndex++];
         tempRegs[2] = xmmRegistersAVX512[registerIndex++];
@@ -354,7 +374,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 availableValues.put("cReg", cRegs[i][j]);
                 availableValues.put("aBroadcast", aBroadcast);
                 availableValues.put("bReg", bRegs[j]);
-                emitOperation(availableValues, opString, masm, tempRegs, cRegs[i][j]);
+                emitOperation(availableValues, opString, masm, cRegs[i][j]);
             }
         }
 
