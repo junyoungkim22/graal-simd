@@ -53,6 +53,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
     private final long[] calcArr;
     private final double[] constArgs;
+    private final int[] varArgProperties;
 
     class ChangeableString {
         private String str;
@@ -81,6 +82,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value jValue;
 
     int stackOffsetToConstArgs;
+    int constArgsStackSize;
 
     final int aLength;
     final int bLength;
@@ -93,7 +95,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     Register[] tempRegs;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs) {
+                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -104,6 +106,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         this.calcArr = calc;
         this.constArgs = constArgs;
+        this.varArgProperties = varArgProperties;
 
         arrsValue = arrs;
         tempArrPtrValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
@@ -160,7 +163,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     public Register emitOperation(Map<String, Register> availableValues, ChangeableString opString,
                         AMD64MacroAssembler masm, Register resultRegister) {
         String op = opString.cutOff(opLength);
-        if(op.equals(GotoOpCode.FMADD.toString())) {
+        String opType = op.substring(0, 2);
+        if(op.equals(GotoOpCode.FMADD)) {
             Register fmaddResultReg = emitOperation(availableValues, opString, masm, resultRegister);
             pushIfNotAvailable(fmaddResultReg, availableValues, masm);
 
@@ -189,7 +193,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
             return fmaddResultReg;
         }
-        else if(op.equals(GotoOpCode.ADD.toString())) { // Todo: Make this conditional include other operations
+        else if(op.equals(GotoOpCode.ADD)) { // Todo: Make this conditional include other operations
             Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
             Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
@@ -197,7 +201,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vaddpd(resultRegister, lhs, rhs);
             return resultRegister;
         }
-        else if(op.equals(GotoOpCode.MASKADD.toString())) { // Todo: Make this conditional include other operations
+        else if(op.equals(GotoOpCode.MASKADD)) { // Todo: Make this conditional include other operations
             Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
             Register mask = emitOperation(availableValues, opString, masm, k1);
@@ -206,7 +210,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vaddpd(resultRegister, lhs, rhs, mask);
             return resultRegister;
         }
-        else if(op.equals(GotoOpCode.LT.toString())) {
+        else if(op.equals(GotoOpCode.LT)) {
             Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
             Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
@@ -214,18 +218,31 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vcmppd(resultRegister, lhs, rhs, 1);
             return resultRegister;
         }
-        else if(op.equals(GotoOpCode.A.toString())) {
+        else if(op.equals(GotoOpCode.GT)) {
+            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
+            pushIfNotAvailable(lhs, availableValues, masm);
+            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
+            popIfNotAvailable(lhs, availableValues, masm);
+            masm.vcmppd(resultRegister, lhs, rhs, 0x0e);
+            return resultRegister;
+        }
+        else if(op.equals(GotoOpCode.A)) {
             return availableValues.get("aBroadcast");
         }
-        else if(op.equals(GotoOpCode.B.toString())) {
+        else if(op.equals(GotoOpCode.B)) {
             return availableValues.get("bReg");
         }
-        else if(op.equals(GotoOpCode.C.toString())) {
+        else if(op.equals(GotoOpCode.C)) {
             return availableValues.get("cReg");
         }
-        else if(op.equals(GotoOpCode.CONSTARG.toString())) {
+        else if(op.equals(GotoOpCode.CONSTARG)) {
             int argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
             masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
+            return resultRegister;
+        }
+        else if(op.equals(GotoOpCode.VARIABLEARG)) {
+            int argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
+            masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
             return resultRegister;
         }
         return resultRegister;
@@ -283,6 +300,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         tempRegs[2] = xmmRegistersAVX512[registerIndex++];
 
         Map<String, Register> availableValues = new HashMap<String, Register>();
+        Map<Integer, Integer> variableArgsStackOffsets = new HashMap<Integer, Integer>();
 
         Register loopIndex = asRegister(loopIndexValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
@@ -290,13 +308,33 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         AMD64Address resultAddress, aAddress, bAddress;
 
+        // Push Variable arguments in reverse order
+        masm.movl(loopIndex, 0);
+        int varArgsStackSize = 0;
+        for(int i = varArgProperties.length-1; i>=0; i--) {
+            if(varArgProperties[i] == 2) {   // index is j
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
+                masm.vmovupd(tempRegs[0], new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
+                masm.subq(rsp, 64);
+                masm.vmovupd(new AMD64Address(rsp), tempRegs[0]);
+            }
+            else if(varArgProperties[i] == 1) {
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
+                masm.vbroadcastsd(tempRegs[0], new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
+                masm.subq(rsp, 64);
+                masm.vmovupd(new AMD64Address(rsp), tempRegs[0]);
+            }
+        }
+
         // Push Constant arguments in reverse order
+        constArgsStackSize = 0;
         for(int i = constArgs.length-1; i >=0; i--) {
             masm.movq(tempArrPtr, Double.doubleToLongBits(constArgs[i]));
             masm.push(tempArrPtr);
+            constArgsStackSize += 8;
         }
 
-        masm.movl(loopIndex, 0);
+        //masm.movl(loopIndex, 0);
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
 
         for(int i = 0; i < aLength; i++) {
@@ -368,8 +406,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
             masm.vbroadcastsd(aBroadcast, aAddress);
             for(int j = 0; j < bLength; j++) {
-                String opStringRaw = Long.toBinaryString(calcArr[0]);
-                opStringRaw = opStringRaw.substring(1, opStringRaw.length());  //Remove first digit (which is 1)
+                String opStringRaw = "";
+                for(int k = 0; k < calcArr.length; k++) {
+                    opStringRaw += Long.toBinaryString(calcArr[k]).substring(1, Long.toBinaryString(calcArr[k]).length());
+                }
+                //String opStringRaw = Long.toBinaryString(calcArr[0]);
+                //opStringRaw = opStringRaw.substring(1, opStringRaw.length());  //Remove first digit (which is 1)
                 ChangeableString opString = new ChangeableString(opStringRaw);
                 availableValues.put("cReg", cRegs[i][j]);
                 availableValues.put("aBroadcast", aBroadcast);
@@ -398,6 +440,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         for(int i = 0; i < constArgs.length; i++) {
             masm.pop(tempArrPtr);
         }
+
+        // Pop variable arguments
+        masm.addq(rsp, 64*varArgProperties.length);
 
         // Restore original value of kPanelSize
         masm.subl(kPanelSize, kPos);

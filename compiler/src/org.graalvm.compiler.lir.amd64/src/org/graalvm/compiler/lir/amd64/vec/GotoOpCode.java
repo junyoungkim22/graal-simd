@@ -1,38 +1,33 @@
 package org.graalvm.compiler.lir.amd64.vec;
 
-public enum GotoOpCode {
-    MUL("00000"),
-    ADD("00001"),
-    FMADD("00010"),
-    SUB("00011"),
-    DIV("00100"),
-    MASKMUL("01000"),
-    MASKADD("01001"),
-    MASKFMADD("01010"),
-    MASKSUB("01011"),
-    MASKDIV("01100"),
-    GT("11000"),
-    GE("11001"),
-    LT("11010"),
-    LE("11011"),
-    EQ("11100"),
-    NEQ("11101"),
-    A("10000"),
-    B("10001"),
-    C("10010"),
-    CONSTARG("10011"),
-    VARIABLEARG("10100"),
-    VARIABLEARRARG("10101")
-    ;
+public final class GotoOpCode {
+    public static final String OP = "00";
+    public static final String MASKOP = "01";
+    public static final String ARGOP = "10";
+    public static final String CMPOP = "11";
 
-    private final String text;
+    public static final String MUL = OP + "000";
+    public static final String ADD = OP + "001";
+    public static final String FMADD = OP + "010";
+    public static final String SUB = OP + "011";
+    public static final String DIV = OP + "100";
 
-    GotoOpCode(final String text) {
-        this.text = text;
-    }
+    public static final String MASKMUL = MASKOP + "000";
+    public static final String MASKADD = MASKOP + "001";
+    public static final String MASKFMADD = MASKOP + "010";
+    public static final String MASKSUB = MASKOP + "011";
+    public static final String MASKDIV = MASKOP + "100";
 
-    @Override
-    public String toString() {
-        return text;
-    }
+    public static final String GT = CMPOP + "000";
+    public static final String GE = CMPOP + "001";
+    public static final String LT = CMPOP + "010";
+    public static final String LE = CMPOP + "011";
+    public static final String EQ = CMPOP + "100";
+    public static final String NEQ = CMPOP + "101";
+
+    public static final String A = ARGOP + "000";
+    public static final String B = ARGOP + "001";
+    public static final String C = ARGOP + "010";
+    public static final String CONSTARG = ARGOP + "011";
+    public static final String VARIABLEARG = ARGOP + "100";
 }

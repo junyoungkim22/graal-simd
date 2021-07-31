@@ -36,18 +36,25 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
     public void generate(NodeLIRBuilderTool gen) {
 	    //int calcJavaConstant = calc.asJavaConstant().asInt();
 	    int arrLen = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayLength(constArgs.asJavaConstant());
-	    int aLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 0).asLong();
-	    int bLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 1).asLong();
-	    int numLongsInOpString = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), 2).asLong();
+	    int curr = 0;
+	    int aLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int bLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int numLongsInOpString = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    long[] argLong = new long[numLongsInOpString];
 	    for(int i = 0; i < argLong.length; i++) {
-	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+3).asLong();
+	        argLong[i] = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    }
-	    double[] constDoubleArgs = new double[arrLen-3-numLongsInOpString];
+	    int numConstantArgs = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    double[] constDoubleArgs = new double[numConstantArgs];
 	    for(int i = 0; i < constDoubleArgs.length; i++) {
-	        constDoubleArgs[i] = (double) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), i+3+numLongsInOpString).asLong();
+	        constDoubleArgs[i] = (double) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    }
+	    int numVarArgs = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int[] varArgProperties = new int[numVarArgs];
+	    for(int i = 0; i < varArgProperties.length; i++) {
+	        varArgProperties[i] = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    }
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong, constDoubleArgs);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong, constDoubleArgs, varArgProperties);
     }
 }
