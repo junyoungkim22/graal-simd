@@ -164,86 +164,102 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                         AMD64MacroAssembler masm, Register resultRegister) {
         String op = opString.cutOff(opLength);
         String opType = op.substring(0, 2);
-        if(op.equals(GotoOpCode.FMADD)) {
-            Register fmaddResultReg = emitOperation(availableValues, opString, masm, resultRegister);
-            pushIfNotAvailable(fmaddResultReg, availableValues, masm);
-
-            Register tempReg0 = null;
-            for(Register reg : tempRegs) {
-                if(!registerEquals(reg, fmaddResultReg)) {
-                    tempReg0 = reg;
-                    break;
+        if(opType.equals(GotoOpCode.OP)) {
+            if(!op.equals(GotoOpCode.FMADD)) {
+                Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
+                pushIfNotAvailable(lhs, availableValues, masm);
+                Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
+                popIfNotAvailable(lhs, availableValues, masm);
+                switch(op) {
+                    case GotoOpCode.ADD:
+                        masm.vaddpd(resultRegister, lhs, rhs);
+                        break;
+                    case GotoOpCode.MUL:
+                        masm.vmulpd(resultRegister, lhs, rhs);
+                        break;
                 }
+                //masm.vaddpd(resultRegister, lhs, rhs);
+                return resultRegister;
             }
-            Register mulLhs = emitOperation(availableValues, opString, masm, tempReg0);
-            pushIfNotAvailable(mulLhs, availableValues, masm);
+            else {
+                Register fmaddResultReg = emitOperation(availableValues, opString, masm, resultRegister);
+                pushIfNotAvailable(fmaddResultReg, availableValues, masm);
 
-            Register tempReg1 = null;
-            for(Register reg : tempRegs) {
-                if(!registerEquals(reg, fmaddResultReg) && !registerEquals(reg, tempReg0)) {
-                    tempReg1 = reg;
-                    break;
+                Register tempReg0 = null;
+                for(Register reg : tempRegs) {
+                    if(!registerEquals(reg, fmaddResultReg)) {
+                        tempReg0 = reg;
+                        break;
+                    }
                 }
+                Register mulLhs = emitOperation(availableValues, opString, masm, tempReg0);
+                pushIfNotAvailable(mulLhs, availableValues, masm);
+
+                Register tempReg1 = null;
+                for(Register reg : tempRegs) {
+                    if(!registerEquals(reg, fmaddResultReg) && !registerEquals(reg, tempReg0)) {
+                        tempReg1 = reg;
+                        break;
+                    }
+                }
+                Register mulRhs = emitOperation(availableValues, opString, masm, tempReg1);
+
+                popIfNotAvailable(mulLhs, availableValues, masm);
+                popIfNotAvailable(fmaddResultReg, availableValues, masm);
+
+                masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
+                return fmaddResultReg;
             }
-            Register mulRhs = emitOperation(availableValues, opString, masm, tempReg1);
-
-            popIfNotAvailable(mulLhs, availableValues, masm);
-            popIfNotAvailable(fmaddResultReg, availableValues, masm);
-
-            masm.vfmadd231pd(fmaddResultReg, mulLhs, mulRhs);
-            return fmaddResultReg;
         }
-        else if(op.equals(GotoOpCode.ADD)) { // Todo: Make this conditional include other operations
-            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
-            pushIfNotAvailable(lhs, availableValues, masm);
-            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
-            popIfNotAvailable(lhs, availableValues, masm);
-            masm.vaddpd(resultRegister, lhs, rhs);
-            return resultRegister;
-        }
-        else if(op.equals(GotoOpCode.MASKADD)) { // Todo: Make this conditional include other operations
+        else if(opType.equals(GotoOpCode.MASKOP)) {
             Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
             Register mask = emitOperation(availableValues, opString, masm, k1);
             Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
             popIfNotAvailable(lhs, availableValues, masm);
-            masm.vaddpd(resultRegister, lhs, rhs, mask);
+            switch(op) {
+                case GotoOpCode.MASKADD:
+                    masm.vaddpd(resultRegister, lhs, rhs, mask);
+                    break;
+            }
+            //masm.vaddpd(resultRegister, lhs, rhs, mask);
             return resultRegister;
         }
-        else if(op.equals(GotoOpCode.LT)) {
+        else if(opType.equals(GotoOpCode.ARGOP)) {
+            int argIndex;
+            switch(op) {
+                case GotoOpCode.A:
+                    return availableValues.get("aBroadcast");
+                case GotoOpCode.B:
+                    return availableValues.get("bReg");
+                case GotoOpCode.C:
+                    return availableValues.get("cReg");
+                case GotoOpCode.CONSTARG:
+                    argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
+                    masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
+                    return resultRegister;
+                case GotoOpCode.VARIABLEARG:
+                    argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
+                    masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
+                    return resultRegister;
+            }
+        }
+        else if(opType.equals(GotoOpCode.CMPOP)) {
             Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
             pushIfNotAvailable(lhs, availableValues, masm);
             Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
             popIfNotAvailable(lhs, availableValues, masm);
-            masm.vcmppd(resultRegister, lhs, rhs, 1);
+            int cmpOperation = 0;
+            switch(op) {
+                case GotoOpCode.LT:
+                    cmpOperation = 1;
+                    break;
+                case GotoOpCode.GT:
+                    cmpOperation = 0x0e;
+            }
+            masm.vcmppd(resultRegister, lhs, rhs, cmpOperation);
             return resultRegister;
-        }
-        else if(op.equals(GotoOpCode.GT)) {
-            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
-            pushIfNotAvailable(lhs, availableValues, masm);
-            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
-            popIfNotAvailable(lhs, availableValues, masm);
-            masm.vcmppd(resultRegister, lhs, rhs, 0x0e);
-            return resultRegister;
-        }
-        else if(op.equals(GotoOpCode.A)) {
-            return availableValues.get("aBroadcast");
-        }
-        else if(op.equals(GotoOpCode.B)) {
-            return availableValues.get("bReg");
-        }
-        else if(op.equals(GotoOpCode.C)) {
-            return availableValues.get("cReg");
-        }
-        else if(op.equals(GotoOpCode.CONSTARG)) {
-            int argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
-            masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
-            return resultRegister;
-        }
-        else if(op.equals(GotoOpCode.VARIABLEARG)) {
-            int argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
-            masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
-            return resultRegister;
+
         }
         return resultRegister;
     }
