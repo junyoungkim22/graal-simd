@@ -83,6 +83,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
     int stackOffsetToConstArgs;
     int constArgsStackSize;
+    final int constArgStackSlotSize;
 
     final int aLength;
     final int bLength;
@@ -117,6 +118,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         this.aLength = aLength;
         this.bLength = bLength/8;
+
+        constArgStackSlotSize = 16;  // Causes an error if value if 8 (do not know reason why)
 
         remainingRegisterNum = 6;
 
@@ -178,7 +181,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                         masm.vmulpd(resultRegister, lhs, rhs);
                         break;
                 }
-                //masm.vaddpd(resultRegister, lhs, rhs);
                 return resultRegister;
             }
             else {
@@ -222,7 +224,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     masm.vaddpd(resultRegister, lhs, rhs, mask);
                     break;
             }
-            //masm.vaddpd(resultRegister, lhs, rhs, mask);
             return resultRegister;
         }
         else if(opType.equals(GotoOpCode.ARGOP)) {
@@ -236,7 +237,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     return availableValues.get("cReg");
                 case GotoOpCode.CONSTARG:
                     argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
-                    masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(8*argIndex)));
+                    masm.vbroadcastsd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+(constArgStackSlotSize*argIndex)));
                     return resultRegister;
                 case GotoOpCode.VARIABLEARG:
                     argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
@@ -346,11 +347,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         constArgsStackSize = 0;
         for(int i = constArgs.length-1; i >=0; i--) {
             masm.movq(tempArrPtr, Double.doubleToLongBits(constArgs[i]));
-            masm.push(tempArrPtr);
-            constArgsStackSize += 8;
+            masm.subq(rsp, constArgStackSlotSize);
+            masm.movq(new AMD64Address(rsp), tempArrPtr);
+            constArgsStackSize += constArgStackSlotSize;
         }
 
-        //masm.movl(loopIndex, 0);
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
 
         for(int i = 0; i < aLength; i++) {
@@ -426,8 +427,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 for(int k = 0; k < calcArr.length; k++) {
                     opStringRaw += Long.toBinaryString(calcArr[k]).substring(1, Long.toBinaryString(calcArr[k]).length());
                 }
-                //String opStringRaw = Long.toBinaryString(calcArr[0]);
-                //opStringRaw = opStringRaw.substring(1, opStringRaw.length());  //Remove first digit (which is 1)
                 ChangeableString opString = new ChangeableString(opStringRaw);
                 availableValues.put("cReg", cRegs[i][j]);
                 availableValues.put("aBroadcast", aBroadcast);
@@ -453,9 +452,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.pop(tempArrPtr);
 
         // Pop const arguments
-        for(int i = 0; i < constArgs.length; i++) {
-            masm.pop(tempArrPtr);
-        }
+        masm.addq(rsp, constArgsStackSize);
 
         // Pop variable arguments
         masm.addq(rsp, 64*varArgProperties.length);
