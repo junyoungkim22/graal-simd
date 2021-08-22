@@ -4880,6 +4880,26 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(src, dst, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    /*
+    // vmovq move from xmm to general purpose
+    public final void vmovq(Register dst, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.128.66.0F.W1 7E /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.XMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x7E);
+        emitModRM(dst, src);
+    }
+
+    // vmovq move from general purpose to xmm
+    public final void vmovq(Register dst, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.128.66.0F.W1 6E /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.XMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x6E);
+        emitModRM(dst, src);
+    }
+    */
+
     // _mm512_add_epi32
     public final void vpaddd(Register dst, Register nds, Register src) {
         assert supports(CPUFeature.AVX512F);
@@ -4950,6 +4970,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
         emitByte(0xB8);
         emitModRM(dst, b);
+    }
+
+    // _vfmadd231pd
+    public final void vfmadd231pd(Register dst, Register a, AMD64Address b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W1 B8 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xB8);
+        emitOperandHelper(dst, b, 0, EVEXTuple.FV_NO_BROADCAST_64BIT.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
     // _mm512_sub_epi32
