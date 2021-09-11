@@ -47,7 +47,8 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    int numConstantArgs = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    double[] constDoubleArgs = new double[numConstantArgs];
 	    for(int i = 0; i < constDoubleArgs.length; i++) {
-	        constDoubleArgs[i] = (double) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	        //constDoubleArgs[i] = (double) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	        constDoubleArgs[i] = Double.longBitsToDouble(gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong());
 	    }
 	    int numVarArgs = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int[] varArgProperties = new int[numVarArgs];
