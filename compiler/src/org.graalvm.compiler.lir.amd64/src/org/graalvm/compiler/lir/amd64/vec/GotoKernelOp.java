@@ -96,6 +96,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value[] remainingRegValues;
 
     Register[] tempRegs;
+    Map<Integer, Integer> variableArgsStackOffsets;
+    int computeIIndex;
+    int computeJIndex;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs, int[] varArgProperties) {
@@ -131,6 +134,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         for(int index = 0; index < remainingRegisterNum; index++) {
             remainingRegValues[index] = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
         }
+
+        variableArgsStackOffsets = new HashMap<Integer, Integer>();
+        int computeIIndex = 0;
+        int computeJIndex = 0;
     }
 
     private static Boolean registerEquals(Register a, Register b) {
@@ -300,7 +307,16 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     return resultRegister;
                 case GotoOpCode.VARIABLEARG:
                     argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
-                    masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
+                    //masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
+                    int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                    if(varArgProperties[argIndex] == 2) {
+                        varArgOffset += 64*computeJIndex;
+                    }
+                    else if(varArgProperties[argIndex] == 1) {
+                        // Todo find correct broadcast vector when index is i
+                        varArgOffset += 0;
+                    }
+                    masm.vmovupd(resultRegister, new AMD64Address(rsp, varArgOffset));
                     return resultRegister;
             }
         }
@@ -349,6 +365,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 for(int k = 0; k < calcArr.length; k++) {
                     opStringRaw += Long.toBinaryString(calcArr[k]).substring(1, Long.toBinaryString(calcArr[k]).length());
                 }
+                computeIIndex = i;
+                computeJIndex = j;
                 ChangeableString opString = new ChangeableString(opStringRaw);
                 availableValues.put("cReg", cRegs[i][j]);
                 availableValues.put("aBroadcast", aBroadcast);
@@ -418,8 +436,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         tempRegs[1] = xmmRegistersAVX512[registerIndex++];
         tempRegs[2] = xmmRegistersAVX512[registerIndex++];
 
-        Map<Integer, Integer> variableArgsStackOffsets = new HashMap<Integer, Integer>();
-
         Register loopIndex = asRegister(loopIndexValue);
         Register tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
         Register tempArrayAddressGeneralReg = findRegister(tempArrayAddressReg, cpuRegisters);
@@ -433,16 +449,26 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         int varArgsStackSize = 0;
         for(int i = varArgProperties.length-1; i>=0; i--) {
             if(varArgProperties[i] == 2) {   // index is j
+                variableArgsStackOffsets.put(i, varArgsStackSize);
                 masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
+                masm.vmovupd(tempRegs[0], new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+64));
+                masm.subq(rsp, 64);
+                masm.vmovupd(new AMD64Address(rsp), tempRegs[0]);
+                varArgsStackSize += 64;
+
                 masm.vmovupd(tempRegs[0], new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
                 masm.subq(rsp, 64);
                 masm.vmovupd(new AMD64Address(rsp), tempRegs[0]);
+                varArgsStackSize += 64;
             }
             else if(varArgProperties[i] == 1) {
+                // Todo: push 12 broadcasts to stack
+                variableArgsStackOffsets.put(i, varArgsStackSize);
                 masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
                 masm.vbroadcastsd(tempRegs[0], new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
                 masm.subq(rsp, 64);
                 masm.vmovupd(new AMD64Address(rsp), tempRegs[0]);
+                varArgsStackSize += 64;
             }
         }
 
@@ -579,7 +605,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.addq(rsp, constArgsStackSize);
 
         // Pop variable arguments
-        masm.addq(rsp, 64*varArgProperties.length);
+        //masm.addq(rsp, 64*varArgProperties.length);
+        masm.addq(rsp, varArgsStackSize);
 
         // Restore original value of kPanelSize
         //masm.subl(kPanelSize, kPos);
