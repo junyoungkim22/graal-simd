@@ -6,6 +6,7 @@ import java.util.HashMap;
 
 import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
+import static org.graalvm.compiler.lir.amd64.vec.GotoOpCode.*;
 import org.graalvm.compiler.lir.amd64.vec.dag.ExprNode;
 
 
@@ -23,11 +24,18 @@ public final class ExprDag {
     public ExprDag(ChangeableString opString) {
         this.subExprMap = new HashMap<>();
         idCount = 0;
-        createDAG(opString);
+        this.rootNode = createDAG(opString);
     }
 
-    public void setDebugLog(PrintWriter writer) {
-        debugLog = writer;
+    public ExprDag(ChangeableString opString, PrintWriter debugLog) {
+        this.debugLog = debugLog;
+        this.subExprMap = new HashMap<>();
+        idCount = 0;
+        this.rootNode = createDAG(opString);
+    }
+
+    public ExprNode getRootNode() {
+        return this.rootNode;
     }
 
     public ExprNode createDAG(ChangeableString opString) {
@@ -61,13 +69,42 @@ public final class ExprDag {
                 children[i].incrementNumberOfParents();
             }
         }
-
         ExprNode ret = new ExprNode(op, idCount++, children);
+        if(!subExprMap.containsKey(ret.toString())) {
+            subExprMap.put(ret.toString(), ret);
+        }
         return ret;
     }
 
-    public void printDAG(PrintWriter writer, ExprNode rootNode) {
-        writer.print(rootNode.getOp());
+    public static void printDAG(PrintWriter writer, ExprNode rootNode) {
+        HashMap<String, String> debugMap = new HashMap<String, String>();
+        debugMap.put(MUL, "MUL");
+        debugMap.put(ADD, "ADD");
+        debugMap.put(FMADD, "FMADD");
+        debugMap.put(SUB, "SUB");
+        debugMap.put(DIV, "DIV");
+        debugMap.put(MASKMUL, "MASKMUL");
+        debugMap.put(MASKADD, "MASKADD");
+        debugMap.put(MASKFMADD, "MASKFMADD");
+        debugMap.put(MASKSUB, "MASKSUB");
+        debugMap.put(MASKDIV, "MASKDIV");
+        debugMap.put(GT, "GT");
+        debugMap.put(GE, "GE");
+        debugMap.put(LT, "LT");
+        debugMap.put(LE, "LE");
+        debugMap.put(EQ, "EQ");
+        debugMap.put(NEQ, "NEQ");
+        debugMap.put(A, "A");
+        debugMap.put(B, "B");
+        debugMap.put(C, "C");
+        debugMap.put(CONSTARG, "CONSTARG");
+        debugMap.put(VARIABLEARG, "VARIABLEARG");
+        String op = rootNode.getOp().substring(0, 5);
+        writer.print(debugMap.get(op));
+        if(op.equals(GotoOpCode.CONSTARG) || op.equals(GotoOpCode.VARIABLEARG)) {
+            writer.print(" " + rootNode.getOp().substring(5, 10));
+        }
+        writer.print("(" + rootNode.getId() + ") ");
         if(rootNode.getChildren() != null) {
             for(ExprNode child : rootNode.getChildren()) {
                 printDAG(writer, child);

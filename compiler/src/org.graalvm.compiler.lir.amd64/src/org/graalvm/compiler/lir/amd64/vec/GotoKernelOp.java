@@ -42,6 +42,7 @@ import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 
 import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
+import org.graalvm.compiler.lir.amd64.vec.dag.ExprDag;
 
 @Opcode("GOTOKERNEL8X8")
 public final class GotoKernelOp extends AMD64LIRInstruction {
@@ -352,12 +353,15 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+        // Make sure to not use debugLog for testing, it increases compile time
         try{
             debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
         } catch (Exception e) {
             System.out.println(e);
         }
-        debugLog.println("HERE!!");
+        ExprDag exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
+        ExprDag.printDAG(debugLog, exprDag.getRootNode());
+
         int registerIndex = 0;
 
         Register arrsPtr = asRegister(arrsValue);
