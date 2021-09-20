@@ -12,6 +12,8 @@ import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
 import java.util.Objects;
 import java.util.HashMap;
 import java.util.Map;
+import java.io.File;
+import java.io.PrintWriter;
 
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.amd64.AMD64Address;
@@ -38,6 +40,7 @@ import static jdk.vm.ci.amd64.AMD64.rsi;
 import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
 import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 
+import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
 
 @Opcode("GOTOKERNEL8X8")
@@ -55,24 +58,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private final long[] calcArr;
     private final double[] constArgs;
     private final int[] varArgProperties;
-
-    class ChangeableString {
-        private String str;
-
-        public ChangeableString(String str) {
-            this.str = str;
-        }
-
-        public String cutOff(int length) {
-            String ret = str.substring(0, length);
-            this.str = str.substring(length, str.length());
-            return ret;
-        }
-
-        public String toString() {
-            return str;
-        }
-    }
 
     @Alive({REG}) private Value arrsValue;
     @Temp({REG}) private Value tempArrPtrValue;
@@ -99,6 +84,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     Map<Integer, Integer> variableArgsStackOffsets;
     int computeIIndex;
     int computeJIndex;
+
+    public static PrintWriter debugLog;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs, int[] varArgProperties) {
@@ -227,19 +214,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
         else if(opType.equals(GotoOpCode.MASKOP)) {
-            /*
-            Register lhs = emitOperation(availableValues, opString, masm, tempRegs[0]);
-            pushIfNotAvailable(lhs, availableValues, masm);
-            Register mask = emitOperation(availableValues, opString, masm, k1);
-            Register rhs = emitOperation(availableValues, opString, masm, tempRegs[1]);
-            popIfNotAvailable(lhs, availableValues, masm);
-            switch(op) {
-                case GotoOpCode.MASKADD:
-                    masm.vaddpd(resultRegister, lhs, rhs, mask);
-                    break;
-            }
-            return resultRegister;
-            */
             Register lhs = emitOperation(availableValues, opString, masm, resultRegister);
             if(!registerEquals(lhs, resultRegister)) {
                 masm.vmovupd(resultRegister, lhs);
@@ -307,7 +281,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     return resultRegister;
                 case GotoOpCode.VARIABLEARG:
                     argIndex = Integer.parseInt(opString.cutOff(opLength), 2);
-                    //masm.vmovupd(resultRegister, new AMD64Address(rsp, stackOffsetToConstArgs+constArgsStackSize+(64*argIndex)));
                     int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
                     if(varArgProperties[argIndex] == 2) {
                         varArgOffset += 64*computeJIndex;
@@ -372,21 +345,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 availableValues.put("aBroadcast", aBroadcast);
                 availableValues.put("bReg", bRegs[j]);
                 emitOperation(availableValues, opString, masm, cRegs[i][j]);
-                /*
-                masm.vmovupd(tempRegs[0], aBroadcast);
-                //masm.vmovupd(cRegs[i][j], tempRegs[0]);
-                masm.vmovupd(tempRegs[1], bRegs[0]);
-                masm.vcmppd(k1, tempRegs[0], tempRegs[1], 1);
-                masm.vaddpd(cRegs[i][j], tempRegs[0], tempRegs[0], k1);
-                //masm.vmovupd(cRegs[i][j], tempRegs[1]);
-                */
-
             }
         }
     }
 
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+        try{
+            debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
+        } catch (Exception e) {
+            System.out.println(e);
+        }
+        debugLog.println("HERE!!");
         int registerIndex = 0;
 
         Register arrsPtr = asRegister(arrsValue);
@@ -494,24 +464,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         // Store pointer to B in temporary register and push to stack
         masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
-        //masm.push(tempArrPtr);
-
-        // Initialize loop index and kPanelSize to loop end
-        //masm.movq(loopIndex, kPos);
-        //masm.addl(kPanelSize, kPos);
-        //masm.movq(loopIndex, 0);
-        //masm.movq(kPanelSize, 128);
-        /*
-        masm.movq(tempArrPtr, 8);
-        masm.movq(loopIndex, kPos);
-        masm.imulq(loopIndex, tempArrPtr);
-        masm.addq(kPanelSize, kPos);
-        masm.imulq(kPanelSize, tempArrPtr);
-        */
-        //masm.leaq(loopIndex, new AMD64Address(loopIndex, kPos, AMD64Address.Scale.Times8, 0));
-        //masm.leaq(kPanelSize, new AMD64Address(loopIndex, kPanelSize, AMD64Address.Scale.Times8, 0));
-        //masm.addq(loopIndex, tempArrPtr);
-        //masm.addq(kPanelSize, tempArrPtr);
 
         masm.leaq(loopIndex, new AMD64Address(tempArrPtr, kPos, OBJECT_ARRAY_INDEX_SCALE, 0));
         masm.leaq(kPanelSize, new AMD64Address(loopIndex, kPanelSize, OBJECT_ARRAY_INDEX_SCALE, 0));
@@ -605,11 +557,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.addq(rsp, constArgsStackSize);
 
         // Pop variable arguments
-        //masm.addq(rsp, 64*varArgProperties.length);
         masm.addq(rsp, varArgsStackSize);
 
         // Restore original value of kPanelSize
-        //masm.subl(kPanelSize, kPos);
         masm.pop(kPanelSize);
 
         // Get pointer to result array
@@ -625,5 +575,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 masm.vmovupd(resultAddress, cRegs[i][j]);
             }
         }
+        debugLog.close();
     }
 }
