@@ -55,7 +55,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private final int OBJECT_ARRAY_BASE_OFFSET;
     private final Scale OBJECT_ARRAY_INDEX_SCALE;
 
-    private final long[] calcArr;
+    private final String opStringRaw;
     private final double[] constArgs;
     private final int[] varArgProperties;
 
@@ -97,7 +97,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         OBJECT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Object);
         OBJECT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Object)));
 
-        this.calcArr = calc;
+        String opStringBuild = "";
+        for(int index = 0; index < calc.length; index++) {
+            opStringBuild += Long.toBinaryString(calc[index]).substring(1, Long.toBinaryString(calc[index]).length());
+        }
+        this.opStringRaw = opStringBuild;
+
         this.constArgs = constArgs;
         this.varArgProperties = varArgProperties;
 
@@ -334,10 +339,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
             masm.vbroadcastsd(aBroadcast, aAddress);
             for(int j = 0; j < bLength; j++) {
-                String opStringRaw = "";
-                for(int k = 0; k < calcArr.length; k++) {
-                    opStringRaw += Long.toBinaryString(calcArr[k]).substring(1, Long.toBinaryString(calcArr[k]).length());
-                }
                 computeIIndex = i;
                 computeJIndex = j;
                 ChangeableString opString = new ChangeableString(opStringRaw);
