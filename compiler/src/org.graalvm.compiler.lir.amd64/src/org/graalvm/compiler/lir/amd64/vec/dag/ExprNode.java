@@ -23,6 +23,7 @@ public final class ExprNode {
         this.op = op;
         this.id = id;
         this.children = children;
+        this.label = -1;
     }
 
     public void incrementNumberOfParents() {
@@ -32,8 +33,22 @@ public final class ExprNode {
     public String getOp() {
         return op;
     }
+
     public int getId() {
         return id;
+    }
+
+    public void setLabel(int label) {
+        if(this.label == -1) {  // set label once
+            this.label = label;
+        }
+    }
+
+    public int getLabel() {
+        return this.label;
+    }
+    public int getNumberOfParents() {
+        return numberOfParents;
     }
 
     public ExprNode[] getChildren() {
