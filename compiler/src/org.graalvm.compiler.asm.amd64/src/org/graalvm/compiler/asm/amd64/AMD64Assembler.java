@@ -4936,11 +4936,11 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(dst, src);
     }
 
-    // _mm512_add_pd with mask (Z0 so that values in dst are untouched if mask is 0)
+    // _mm512_add_pd with mask (Z1 so that values in dst are zeroed if mask is 0)
     public final void vaddpd(Register dst, Register nds, Register src, Register mask) {
         assert supports(CPUFeature.AVX512F);
         // Code: EVEX.512.66.0F.W1 58 /r
-        evexPrefix(dst, mask, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        evexPrefix(dst, mask, nds, src, AVXSize.ZMM, P_66, M_0F, W1, Z1, B0);
         emitByte(0x58);
         emitModRM(dst, src);
     }

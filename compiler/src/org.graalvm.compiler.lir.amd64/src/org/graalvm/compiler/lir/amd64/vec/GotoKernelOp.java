@@ -82,9 +82,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) private Value[] remainingRegValues;
 
     Register[] tempRegs;
+    int[] tempRegNums;
     Map<Integer, Integer> variableArgsStackOffsets;
     int computeIIndex;
     int computeJIndex;
+    private ExprDag exprDag;
 
     public static PrintWriter debugLog;
 
@@ -328,7 +330,17 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
-        Map<String, Register> availableValues = new HashMap<String, Register>();
+        HashMap<String, Integer> availableValues = new HashMap<String, Integer>();
+        availableValues.put(GotoOpCode.A, 0);
+        debugLog.write("BEFORE");
+        if(varArgProperties.length > 0) {
+            debugLog.write("I'm HERE!!!!");
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
+            masm.vmovupd(xmmRegistersAVX512[27], new AMD64Address(rsp, varArgOffset));
+            masm.vmovupd(xmmRegistersAVX512[28], new AMD64Address(rsp, varArgOffset+64));
+            //masm.vmovupd(xmmRegistersAVX512[27], bRegs[0]);
+            //masm.vmovupd(xmmRegistersAVX512[28], bRegs[1]);
+        }
 
         for(int i = 0; i < aLength; i++) {
             if(i < aTempArrayAddressNumLimit) {
@@ -342,11 +354,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             for(int j = 0; j < bLength; j++) {
                 computeIIndex = i;
                 computeJIndex = j;
+                availableValues.put(GotoOpCode.B, 1+computeJIndex);
+                availableValues.put(GotoOpCode.VARIABLEARG + "00000", 27+computeJIndex);
+                availableValues.put(GotoOpCode.C, 3+(2*computeIIndex)+computeJIndex);
+                exprDag.createCode(availableValues, tempRegNums, masm);
+
+                /*
                 ChangeableString opString = new ChangeableString(opStringRaw);
                 availableValues.put("cReg", cRegs[i][j]);
                 availableValues.put("aBroadcast", aBroadcast);
                 availableValues.put("bReg", bRegs[j]);
                 emitOperation(availableValues, opString, masm, cRegs[i][j]);
+                */
             }
         }
     }
@@ -359,8 +378,26 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         } catch (Exception e) {
             System.out.println(e);
         }
-        ExprDag exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
+        /*
+        HashMap<String, Integer> availableValues = new HashMap<>();
+        availableValues.put(GotoOpCode.A, 0);
+        availableValues.put(GotoOpCode.B, 1);
+        availableValues.put(GotoOpCode.C, 8);
+        if(varArgProperties.length > 0) {
+            availableValues.put(GotoOpCode.VARIABLEARG + "00000", 3);
+        }
+        */
+        tempRegNums = new int[]{29, 30, 31};
+        //ExprDag exprDag = new ExprDag(new ChangeableString(opStringRaw), availableValues, tempRegNums, debugLog);
+        exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
         ExprDag.printDAG(debugLog, exprDag.getRootNode());
+        debugLog.write("\n");
+        /*
+        if(debugLog != null) {
+            debugLog.close();
+            return;
+        }
+        */
 
         int registerIndex = 0;
 

@@ -11,9 +11,6 @@ public final class ExprNode {
 
     private int numberOfParents;
 
-    // To check when to free register / stack
-    private int referenced;
-
     // for choosing paths in Sethi-Ullman algorithm
     private int label;
 
