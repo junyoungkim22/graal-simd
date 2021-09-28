@@ -353,6 +353,7 @@ public final class ExprDag {
                 switch(op) {
                     case GotoOpCode.MASKADD:
                         masm.vaddpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum], k1);
+                        break;
                 }
             }
         }
