@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.Stack;
 
 import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
@@ -33,7 +34,7 @@ public final class ExprDag {
     private HashMap<Integer, Integer> referenceCount;
     private HashMap<String, Integer> nameToRegNum;
     private Queue<Integer> usedRegisters;
-    private Queue<Integer> availableRegisters;
+    private Stack<Integer> availableRegisters;
 
     private PrintWriter debugLog;
 
@@ -94,9 +95,9 @@ public final class ExprDag {
         }
         */
         this.usedRegisters = new LinkedList<>();
-        this.availableRegisters = new LinkedList<>();
-        for(int regNum : tempRegs) {
-            this.availableRegisters.add(regNum);
+        this.availableRegisters = new Stack<>();
+        for(int i = tempRegs.length - 1; i >= 0; i--) {
+            this.availableRegisters.push(tempRegs[i]);
         }
         this.instructions = new ArrayList<>();
         generateCode(this.rootNode);
@@ -167,7 +168,6 @@ public final class ExprDag {
     }
 
     public void generateCode(ExprNode currNode) {
-        referenceCount.put(currNode.getId(), referenceCount.get(currNode.getId())+1);
         if(locationTracker.containsKey(currNode.getId())) {
             return;
         }
@@ -225,7 +225,7 @@ public final class ExprDag {
                     newInst.dst = "K2";
                 }
                 else {
-                    int newRegister = availableRegisters.remove();
+                    int newRegister = availableRegisters.pop();
                     newInst.dst = "R" + newRegister;
                 }
                 newInst.src0 = locationTracker.get(currNode.getChildren()[0].getId());
@@ -278,13 +278,13 @@ public final class ExprDag {
             for(int i = 0; i < evalList.length; i++) {
                 generateCode(evalList[i]);
             }
-
+            
             // Free registers
             for(ExprNode child : currNode.getChildren()) {
                 freeRegister(child);
             }
 
-            int newRegister = availableRegisters.remove();
+            int newRegister = availableRegisters.pop();
 
             Inst newInst = new Inst();
             newInst.dst = "R" + newRegister;
@@ -361,13 +361,14 @@ public final class ExprDag {
 
     // Free the register a node is using
     public void freeRegister(ExprNode node) {
+        referenceCount.put(node.getId(), referenceCount.get(node.getId())+1);  // increment reference count of child
         if(referenceCount.get(node.getId()) == node.getNumberOfParents()) { // check if child does not need to be referenced again
             String location = locationTracker.get(node.getId());
             if(location.substring(0, 1).equals("R")) {  // check if child is in register
                 int registerNum = Integer.valueOf(location.substring(1, location.length()));
                 if(usedRegisters.contains(registerNum)) {  // check if child is using a temporary register
                     usedRegisters.remove(registerNum);
-                    availableRegisters.add(registerNum);
+                    availableRegisters.push(registerNum);
                 }
             }
         }

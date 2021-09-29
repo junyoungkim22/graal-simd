@@ -176,12 +176,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         HashMap<String, Integer> availableValues = new HashMap<String, Integer>();
         availableValues.put(GotoOpCode.A, simdRegisters.get("A"));
-        debugLog.write("BEFORE");
         if(varArgProperties.length > 0) {
-            debugLog.write("I'm HERE!!!!");
             int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
-            masm.vmovupd(xmmRegistersAVX512[27], new AMD64Address(rsp, varArgOffset));
-            masm.vmovupd(xmmRegistersAVX512[28], new AMD64Address(rsp, varArgOffset+64));
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]], new AMD64Address(rsp, varArgOffset));
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[1]], new AMD64Address(rsp, varArgOffset+64));
             //masm.vmovupd(xmmRegistersAVX512[27], bRegs[0]);
             //masm.vmovupd(xmmRegistersAVX512[28], bRegs[1]);
         }
@@ -197,9 +195,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
             for(int j = 0; j < bLength; j++) {
                 availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
-                //availableValues.put(GotoOpCode.VARIABLEARG + "00000", 27+computeJIndex);
+                availableValues.put(GotoOpCode.VARIABLEARG + "00000", tempRegNums[0]+j);
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
-                exprDag.createCode(availableValues, tempRegNums, masm);
+                exprDag.createCode(availableValues, new int[]{29, 30, 31}, masm);
+                //exprDag.createCode(availableValues, tempRegNums, masm);
             }
         }
     }
@@ -233,8 +232,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
         */
 
-
-
         Register arrsPtr = asRegister(arrsValue);
         Register tempArrPtr = asRegister(tempArrPtrValue);
 
@@ -254,7 +251,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         kPanelSizeIndexFromBehind = useAsAddressRegs.length - kPanelSizeIndexFromBehind - 1;
 
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum+useAsAddressRegs.length ? aLength : remainingRegisterNum+useAsAddressRegs.length;
-        //Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) { // Changed!
             if(i < remainingRegisterNum) {
