@@ -61,7 +61,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private final int[] varArgProperties;
 
     @Alive({REG}) private Value arrsValue;
-    @Temp({REG}) private Value tempArrPtrValue;
 
     @Temp({REG}) private Value kPanelSizeValue;
     @Temp({REG}) private Value iValue;
@@ -110,7 +109,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.varArgProperties = varArgProperties;
 
         arrsValue = arrs;
-        tempArrPtrValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
         kPanelSizeValue = kPanelSize;
         iValue = i;
         kValue = k;
@@ -121,7 +119,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         constArgStackSlotSize = 32;  // Causes an error if value if 8 (do not know reason why)
 
-        remainingRegisterNum = 6;
+        remainingRegisterNum = 7;
 
         loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
         tempArrayAddressRegValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
@@ -152,17 +150,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register loopIndex = generalPurposeRegisters.get("loopIndex");
         Register tempArrayAddressReg = generalPurposeRegisters.get("tempArrayAddressReg");
         Register jPos = generalPurposeRegisters.get("jPos");
-        Register tempArrPtr = generalPurposeRegisters.get("tempArrPtr");
 
         AMD64Address aAddress, bAddress;
-
-        bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
-        masm.movq(tempArrayAddressReg, bAddress);
-
-        for(int j = 0; j < bLength; j++) {
-            bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
-            masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
-        }
 
         if(prefetchDistance > 0) {
             bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8)+(prefetchDistance*8));
@@ -174,23 +163,24 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
+        bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
+        masm.movq(tempArrayAddressReg, bAddress);
+
+        for(int j = 0; j < bLength; j++) {
+            bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+            masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+        }
+
         HashMap<String, Integer> availableValues = new HashMap<String, Integer>();
         availableValues.put(GotoOpCode.A, simdRegisters.get("A"));
-        if(varArgProperties.length > 0) {
-            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
-            masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]], new AMD64Address(rsp, varArgOffset));
-            masm.vmovupd(xmmRegistersAVX512[tempRegNums[1]], new AMD64Address(rsp, varArgOffset+64));
-            //masm.vmovupd(xmmRegistersAVX512[27], bRegs[0]);
-            //masm.vmovupd(xmmRegistersAVX512[28], bRegs[1]);
-        }
 
         for(int i = 0; i < aLength; i++) {
             if(i < aTempArrayAddressNumLimit) {
-                //aAddress = new AMD64Address(aTempArrayAddressRegs[i], loopIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
                 aAddress = new AMD64Address(aTempArrayAddressRegs[i], loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
             }
             else {
-                aAddress = new AMD64Address(tempArrPtr, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
+                // Todo: read from stack
+                aAddress = null;
             }
             masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
             for(int j = 0; j < bLength; j++) {
@@ -199,6 +189,58 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
                 exprDag.createCode(availableValues, new int[]{29, 30, 31}, masm);
                 //exprDag.createCode(availableValues, tempRegNums, masm);
+                /*
+                masm.vmulpd(xmmRegistersAVX512[29], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                masm.vcmppd(k1, xmmRegistersAVX512[29], xmmRegistersAVX512[tempRegNums[0]+j], 0x0e);
+                masm.vaddpd(xmmRegistersAVX512[30], xmmRegistersAVX512[29], xmmRegistersAVX512[tempRegNums[0]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[30], xmmRegistersAVX512[29], xmmRegistersAVX512[30]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[30]);
+                */
+                /*
+                masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+                masm.vmulpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                masm.vcmppd(k1, xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], 0x0e);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[31]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[31]);
+                */
+                /*
+                bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+                masm.vmulpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                masm.vcmppd(k1, xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], 0x0e);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], xmmRegistersAVX512[31]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[31]);
+                */
+                /*
+                masm.vmulpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
+                masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]], new AMD64Address(rsp, varArgOffset + 64*j));
+                masm.vcmppd(k1, xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[0]], 0x0e);
+                masm.vaddpd(xmmRegistersAVX512[tempRegNums[0]], xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[0]], xmmRegistersAVX512[31]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[31]);
+                */
+                /*
+                masm.vmulpd(xmmRegistersAVX512[31], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                masm.vcmppd(k1, xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[0]+j], 0x0e);
+                masm.subq(rsp, 64);
+                masm.vmovupd(new AMD64Address(rsp), xmmRegistersAVX512[tempRegNums[0]+j]);
+                masm.vaddpd(xmmRegistersAVX512[tempRegNums[0]+j], xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[2]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[31], xmmRegistersAVX512[tempRegNums[0]+j], xmmRegistersAVX512[31]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[31]);
+                masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]+j], new AMD64Address(rsp));
+                masm.addq(rsp, 64);
+                */
+                //masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                /*
+                masm.vmulpd(xmmRegistersAVX512[27], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                masm.vcmppd(k1, xmmRegistersAVX512[27], xmmRegistersAVX512[tempRegNums[0]+j], 0x0e);
+                masm.vaddpd(xmmRegistersAVX512[28], xmmRegistersAVX512[27], xmmRegistersAVX512[tempRegNums[2]+j], k1);
+                masm.vaddpd(xmmRegistersAVX512[27], xmmRegistersAVX512[27], xmmRegistersAVX512[28]);
+                masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[27]);
+                */
             }
         }
     }
@@ -233,15 +275,14 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         */
 
         Register arrsPtr = asRegister(arrsValue);
-        Register tempArrPtr = asRegister(tempArrPtrValue);
 
         Register kPanelSize = asRegister(kPanelSizeValue);
         Register iPos = asRegister(iValue);
         Register kPos = asRegister(kValue);
         Register jPos = asRegister(jValue);
 
-        // Make sure that iPos is last!
-        Register useAsAddressRegs[] = new Register[]{arrsPtr, kPos, r15, kPanelSize, iPos};
+        // Make sure that iPos is first!
+        Register useAsAddressRegs[] = new Register[]{iPos, arrsPtr, kPos, r15, kPanelSize};
         int kPanelSizeIndexFromBehind = 0;
         for(int i = 0; i < useAsAddressRegs.length; i++) {
             if(useAsAddressRegs[i] == kPanelSize) {
@@ -252,12 +293,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum+useAsAddressRegs.length ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
-        for(int i = 0; i < aTempArrayAddressNumLimit; i++) { // Changed!
-            if(i < remainingRegisterNum) {
-                aTempArrayAddressRegs[i] = asRegister(remainingRegValues[i]);
+        for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
+            if(i < useAsAddressRegs.length) {
+                aTempArrayAddressRegs[i] = findRegister(useAsAddressRegs[i], cpuRegisters);
             }
             else {
-                aTempArrayAddressRegs[i] = findRegister(useAsAddressRegs[i-remainingRegisterNum], cpuRegisters);
+                aTempArrayAddressRegs[i] = asRegister(remainingRegValues[i-useAsAddressRegs.length]);
             }
         }
 
@@ -295,7 +336,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         int varArgsStackSize = 0;
         for(int i = varArgProperties.length-1; i>=0; i--) {
             if(varArgProperties[i] == 2) {   // index is j
-                variableArgsStackOffsets.put(i, varArgsStackSize);
+                //variableArgsStackOffsets.put(i, varArgsStackSize);
+                for(int varArgIndex : variableArgsStackOffsets.keySet()) {
+                    variableArgsStackOffsets.put(varArgIndex, variableArgsStackOffsets.get(varArgIndex) + 128);
+                }
+                variableArgsStackOffsets.put(i, 0);
                 masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
                 masm.vmovupd(tempReg, new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+64));
                 masm.subq(rsp, 64);
@@ -318,19 +363,21 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
+        Register tempGenReg = asRegister(remainingRegValues[remainingRegisterNum-1]);
+
         // Push Constant arguments in reverse order
         constArgsStackSize = 0;
         for(int i = constArgs.length-1; i >=0; i--) {
-            masm.movq(tempArrPtr, Double.doubleToLongBits(constArgs[i]));
+            masm.movq(tempGenReg, Double.doubleToLongBits(constArgs[i]));
             masm.subq(rsp, constArgStackSlotSize);
-            masm.movq(new AMD64Address(rsp), tempArrPtr);
+            masm.movq(new AMD64Address(rsp), tempGenReg);
             constArgsStackSize += constArgStackSlotSize;
         }
 
-        masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
 
         for(int i = 0; i < aLength; i++) {
-            resultAddress = new AMD64Address(tempArrPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+            resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
             masm.movq(tempArrayAddressReg, resultAddress);
             for(int j = 0; j < bLength; j++) {
                 resultAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
@@ -339,15 +386,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         // Store B[0]'s address in tempArrPtr
-        masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
 
         // Store B[k]'s address in loop index
-        masm.leaq(loopIndex, new AMD64Address(tempArrPtr, kPos, OBJECT_ARRAY_INDEX_SCALE, 0));
+        masm.leaq(loopIndex, new AMD64Address(tempGenReg, kPos, OBJECT_ARRAY_INDEX_SCALE, 0));
+
+        // Store (&B[k] + kPanelSize) in kPanelSize register
         masm.leaq(kPanelSize, new AMD64Address(loopIndex, kPanelSize, OBJECT_ARRAY_INDEX_SCALE, 0));
 
         masm.push(loopIndex);
 
-        masm.movq(loopIndex, tempArrPtr);
+        // Store &B[0] in loopIndex
+        masm.movq(loopIndex, tempGenReg);
 
         // Push registers to be used for storing addresses of A on stack
         for(int i = 0; i < useAsAddressRegs.length; i++) {
@@ -356,35 +406,46 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         // Load A
         masm.movl(tempArrayAddressGeneralReg, 0);
-        masm.movq(tempArrPtr, new AMD64Address(arrsPtr, tempArrayAddressGeneralReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, tempArrayAddressGeneralReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
 
         // Push Addresses of A that are not savable on a register on stack first, so register iPos can be pushed on stack last
         int numOfAAddressOnStack = 0;
-        for(int i = aTempArrayAddressNumLimit; i < aLength; i++) {
-            aAddress = new AMD64Address(tempArrPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));  // Get (i + 11)th row of A
-            masm.movq(tempArrayAddressReg, aAddress);
-            //AMD64Assembler.VexMoveOp.VMOVQ.emit(masm, AVXSize.XMM, tempRegs[0], tempArrayAddressReg);
-            masm.subq(tempArrayAddressReg, loopIndex);
-            masm.push(tempArrayAddressReg);
-            //numOfAAddressOnStack++;
-        }
-        for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
-            aAddress = new AMD64Address(tempArrPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
-            masm.movq(aTempArrayAddressRegs[i], aAddress);
-            masm.subq(aTempArrayAddressRegs[i], loopIndex);
+        for(int i = aLength - 1; i >= 0; i--) {
+            if(i < aTempArrayAddressNumLimit) {
+                if(i == 11) {
+                    aAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));  // Get (i + 11)th row of A
+                    masm.movq(tempArrayAddressReg, aAddress);
+                    masm.subq(tempArrayAddressReg, loopIndex);
+                    masm.push(tempArrayAddressReg);
+                }
+                else {
+                    aAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+                    masm.movq(aTempArrayAddressRegs[i], aAddress);
+                    masm.subq(aTempArrayAddressRegs[i], loopIndex);
+                }
+            }
+            // Todo: Push A addresses to stack
         }
 
         // Calculate offset to constant arguments
         stackOffsetToConstArgs = /*numOfAAddressOnStack*8 +*/useAsAddressRegs.length*8 + 8;
 
-        if(aTempArrayAddressNumLimit < aLength) {
-            masm.pop(tempArrPtr);
+        if(aTempArrayAddressNumLimit >= 12) {
+            masm.pop(aTempArrayAddressRegs[11]);
         }
         masm.movq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(useAsAddressRegs.length*8)));
 
         int prefetchDistance = 4;
-
         int mult = 8;
+
+        if(varArgProperties.length > 0) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]], new AMD64Address(rsp, varArgOffset));
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[1]], new AMD64Address(rsp, varArgOffset+64));
+            varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(1);
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[2]], new AMD64Address(rsp, varArgOffset));
+            masm.vmovupd(xmmRegistersAVX512[tempRegNums[3]], new AMD64Address(rsp, varArgOffset+64));
+        }
 
         masm.subq(new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)), prefetchDistance*mult);
 
@@ -393,7 +454,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Map<String, Register> generalPurposeRegisters = new HashMap<String, Register>();
         generalPurposeRegisters.put("loopIndex", loopIndex);
         generalPurposeRegisters.put("jPos", jPos);
-        generalPurposeRegisters.put("tempArrPtr", tempArrPtr);
         generalPurposeRegisters.put("tempArrayAddressReg", tempArrayAddressReg);
 
         int unrollFactor = 2;
@@ -403,7 +463,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         for(int i = 0; i < unrollFactor; i++) {
             subIter(i, prefetchDistance, masm, simdRegisters, aTempArrayAddressRegs, generalPurposeRegisters);
         }
-        //subIter(0, prefetchDistance, masm, aBroadcast, bRegs, cRegs, aTempArrayAddressRegs, generalPurposeRegisters);
         masm.addq(loopIndex, unrollFactor*mult);
         masm.cmpq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
@@ -428,7 +487,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         // Pop B
-        masm.pop(tempArrPtr);
+        masm.pop(tempGenReg);
 
         // Pop const arguments
         masm.addq(rsp, constArgsStackSize);
@@ -441,11 +500,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         // Get pointer to result array
         masm.movl(loopIndex, 0);
-        masm.movq(tempArrPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
 
         // Store partial results in result array
         for(int i = 0; i < aLength; i++) {
-            resultAddress = new AMD64Address(tempArrPtr, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+            resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
             masm.movq(tempArrayAddressReg, resultAddress);
             for(int j = 0; j < bLength; j++) {
                 resultAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
