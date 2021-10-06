@@ -180,7 +180,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
             else {
                 // Todo: read from stack
-                aAddress = null;
+                masm.movq(tempArrayAddressReg, new AMD64Address(rsp, 8*(i-aTempArrayAddressNumLimit)));
+                aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
             }
             masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
             for(int j = 0; j < bLength; j++) {
@@ -424,15 +425,22 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     masm.subq(aTempArrayAddressRegs[i], loopIndex);
                 }
             }
+            else {
+                aAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+                masm.movq(tempArrayAddressReg, aAddress);
+                masm.subq(tempArrayAddressReg, loopIndex);
+                masm.push(tempArrayAddressReg);
+                numOfAAddressOnStack++;
+            }
             // Todo: Push A addresses to stack
         }
-
-        // Calculate offset to constant arguments
-        stackOffsetToConstArgs = /*numOfAAddressOnStack*8 +*/useAsAddressRegs.length*8 + 8;
 
         if(aTempArrayAddressNumLimit >= 12) {
             masm.pop(aTempArrayAddressRegs[11]);
         }
+        // Calculate offset to constant arguments
+        stackOffsetToConstArgs = numOfAAddressOnStack*8 + useAsAddressRegs.length*8 + 8;
+
         masm.movq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(useAsAddressRegs.length*8)));
 
         int prefetchDistance = 4;
