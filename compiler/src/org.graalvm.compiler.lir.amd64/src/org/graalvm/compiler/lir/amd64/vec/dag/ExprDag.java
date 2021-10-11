@@ -84,7 +84,7 @@ public final class ExprDag {
     public void createCode(HashMap<String, Integer> availableValues, int[] tempRegs, AMD64MacroAssembler masm) {
         this.nameToRegNum = availableValues;
         this.locationTracker = new HashMap<>();
-        for(String key : leafToId.keySet()) {
+        for(String key : availableValues.keySet()) {
             locationTracker.put(leafToId.get(key), "R" + String.valueOf(availableValues.get(key)));
         }
         //debugLog.write("-------\n");
@@ -154,11 +154,11 @@ public final class ExprDag {
             debugMap.put(C, "C");
             debugMap.put(CONSTARG, "CONSTARG");
             debugMap.put(VARIABLEARG, "VARIABLEARG");
-            if(mask.equals("")) {
-                return debugMap.get(op) + " " + dst + " " + src0 + " " + src1;
+            if(debugMap.containsKey(op)) {
+                return debugMap.get(op) + " " + mask + " " + dst + " " + src0 + " " + src1;
             }
             else {
-                return debugMap.get(op) + " " + mask + " " + dst + " " + src0 + " " + src1;
+                return toString();
             }
         }
     }
@@ -175,11 +175,13 @@ public final class ExprDag {
         String opType = op.substring(0, 2);
         int argIndex = 0;
         if(opType.equals(GotoOpCode.ARGOP)) {
-            Inst newInst = new Inst();
             if(locationTracker.containsKey(currNode.getId())) {
                 return;
             }
+            Inst newInst = new Inst();
             // Todo : evaluate expression from 'source'
+            int newRegister = availableRegisters.pop();
+            newInst.dst = "R" + newRegister;
             switch(op) {
                 case GotoOpCode.A:
                     newInst.op = "A";
@@ -199,6 +201,8 @@ public final class ExprDag {
                     newInst.op = "VARIABLEARG " + argIndex;
                     break;
             }
+            locationTracker.put(currNode.getId(), newInst.dst);
+            usedRegisters.add(Integer.valueOf(newInst.dst.substring(1,newInst.dst.length())));
             instructions.add(newInst);
         }
         else if(opType.equals(GotoOpCode.OP) || opType.equals(GotoOpCode.CMPOP)) {
@@ -278,7 +282,7 @@ public final class ExprDag {
             for(int i = 0; i < evalList.length; i++) {
                 generateCode(evalList[i]);
             }
-            
+
             // Free registers
             for(ExprNode child : currNode.getChildren()) {
                 freeRegister(child);
