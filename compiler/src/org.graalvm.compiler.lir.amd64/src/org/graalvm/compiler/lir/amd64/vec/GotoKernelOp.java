@@ -72,6 +72,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     int aTempArrayAddressNumLimit;
     final int constArgStackSlotSize;
 
+    final int mLength, kLength, nLength;
     final int aLength;
     final int bLength;
     final int remainingRegisterNum;
@@ -93,7 +94,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     public static PrintWriter debugLog;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, int aLength, int bLength, long[] calc, double[] constArgs, int[] varArgProperties) {
+                                    Value i, Value k, Value j, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -117,6 +118,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         kValue = k;
         jValue = j;
 
+        this.mLength = mLength;
+        this.kLength = kLength;
+        this.nLength = nLength;
         this.aLength = aLength;
         this.bLength = bLength/8;
 
@@ -408,6 +412,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
         ExprDag.printDAG(debugLog, exprDag.getRootNode());
         debugLog.write("\n");
+
+        //debugLog.write(mLength + "\n");
+        //debugLog.write(kLength + "\n");
+        //debugLog.write(nLength + "\n");
         /*
         if(debugLog != null) {
             debugLog.close();

@@ -37,6 +37,7 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    //int calcJavaConstant = calc.asJavaConstant().asInt();
 	    int arrLen = gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayLength(constArgs.asJavaConstant());
 	    int curr = 0;
+
 	    int aLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int bLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int numLongsInOpString = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
@@ -55,7 +56,12 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    for(int i = 0; i < varArgProperties.length; i++) {
 	        varArgProperties[i] = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    }
+
+	    int mLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int kLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int nLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, argLong, constDoubleArgs, varArgProperties);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, mLength, kLength, nLength, argLong, constDoubleArgs, varArgProperties);
     }
 }
