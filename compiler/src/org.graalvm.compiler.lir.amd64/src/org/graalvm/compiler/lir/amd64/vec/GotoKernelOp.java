@@ -444,9 +444,18 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.push(iPos);
         masm.push(kPanelSize);
 
+        // Check if kPanelSize overflows bounds.
+        masm.addq(kPanelSize, kPos);
+        masm.cmpl(kPanelSize, kLength);
+        Label kPanelSizeCheckLabel = new Label();
+        masm.jcc(AMD64MacroAssembler.ConditionFlag.LessEqual, kPanelSizeCheckLabel);
+        masm.movq(kPanelSize, kLength);
+        masm.bind(kPanelSizeCheckLabel);
+        masm.subq(kPanelSize, kPos);
+
         // Push arguments in reverse order
         pushArguments(masm);
-        
+
         masm.movq(tempArrayAddressReg, iPos);
         masm.addq(tempArrayAddressReg, initialALength);
 
