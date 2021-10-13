@@ -73,8 +73,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     final int constArgStackSlotSize;
 
     final int mLength, kLength, nLength;
-    final int aLength;
-    final int bLength;
+    final int initialALength;
+    final int initialBLength;
     final int remainingRegisterNum;
 
     @Temp({REG}) private Value loopIndexValue;
@@ -121,8 +121,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.mLength = mLength;
         this.kLength = kLength;
         this.nLength = nLength;
-        this.aLength = aLength;
-        this.bLength = bLength/8;
+        this.initialALength = aLength;
+        this.initialBLength = bLength/8;
 
         constArgStackSlotSize = 32;  // Causes an error if value if 8 (do not know reason why)
 
@@ -152,7 +152,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         return null;
     }
 
-    public void subIter(int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters, Register[] aTempArrayAddressRegs) {
+    public void subIter(int aLength, int bLength, int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters, Register[] aTempArrayAddressRegs) {
         AMD64Address aAddress, bAddress;
 
         if(prefetchDistance > 0) {
@@ -364,7 +364,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // Iterate from kPos to kPos + kPanelSize-1 and store partial results in c** registers
         masm.bind(loopLabel);
         for(int i = 0; i < unrollFactor; i++) {
-            subIter(i, prefetchDistance, masm, simdRegisters, aTempArrayAddressRegs);
+            subIter(aLength, bLength, i, prefetchDistance, masm, simdRegisters, aTempArrayAddressRegs);
         }
         masm.addq(loopIndex, unrollFactor*mult);
         masm.cmpq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
@@ -375,7 +375,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         loopLabel = new Label();
         // Iterate from kPos to kPos + kPanelSize-1 and store partial results in c** registers
         masm.bind(loopLabel);
-        subIter(0, 0, masm, simdRegisters, aTempArrayAddressRegs);
+        subIter(aLength, bLength, 0, 0, masm, simdRegisters, aTempArrayAddressRegs);
         masm.addq(loopIndex, mult);
         masm.cmpq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
@@ -441,18 +441,57 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
         kPanelSizeIndexFromBehind = useAsAddressRegs.length - kPanelSizeIndexFromBehind - 1;
 
+        masm.push(iPos);
         masm.push(kPanelSize);
 
         // Push arguments in reverse order
         pushArguments(masm);
+        
+        masm.movq(tempArrayAddressReg, iPos);
+        masm.addq(tempArrayAddressReg, initialALength);
 
-        emitKernelCode(masm, aLength, bLength);
+        Label endLabel = new Label();
+        Label loopLabel = new Label();
+        masm.cmpl(tempArrayAddressReg, mLength);
+        masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
+        emitKernelCode(masm, initialALength, initialBLength);
+        masm.jmp(endLabel);
+
+        masm.bind(loopLabel);
+
+        int tempALength = initialALength;
+        if(tempALength == 12) {
+            tempALength = 8;
+        }
+        else {
+            tempALength /= 2;
+        }
+
+        while(tempALength > 0) {
+            masm.movq(tempArrayAddressReg, iPos);
+            masm.addq(tempArrayAddressReg, tempALength);
+
+            loopLabel = new Label();
+            // Check if iPos + tempALength > mLength
+            masm.cmpl(tempArrayAddressReg, mLength);
+            masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
+            emitKernelCode(masm, tempALength, initialBLength);
+            masm.addq(iPos, tempALength);
+            masm.bind(loopLabel);
+
+            tempALength /= 2;
+        }
+
+
+        masm.bind(endLabel);
 
         // Pop arguments + B
         masm.addq(rsp, constArgsStackSize + varArgsStackSize + 8);
 
         // Restore original value of kPanelSize
         masm.pop(kPanelSize);
+
+        masm.pop(iPos);
 
         debugLog.close();
     }
