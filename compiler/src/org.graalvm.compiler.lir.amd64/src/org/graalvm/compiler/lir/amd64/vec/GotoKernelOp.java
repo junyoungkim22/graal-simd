@@ -276,6 +276,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register tempGenReg = asRegister(remainingRegValues[remainingRegisterNum-1]);
 
         // Store previous values of the result array into SIMD registers
+        masm.movq(loopIndex, 0);
         masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
         for(int i = 0; i < aLength; i++) {
             resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
@@ -333,6 +334,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             }
         }
 
+
         if(aTempArrayAddressNumLimit >= 12) {
             // When aTempArrayAddressNumLimit >= 12, aTempArrayAddressRegs[11] == tempGenReg
             masm.pop(aTempArrayAddressRegs[11]);
@@ -373,11 +375,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.addq(new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)), prefetchDistance*mult);
 
         loopLabel = new Label();
-        // Iterate from kPos to kPos + kPanelSize-1 and store partial results in c** registers
         masm.bind(loopLabel);
         subIter(aLength, bLength, 0, 0, masm, simdRegisters, aTempArrayAddressRegs);
         masm.addq(loopIndex, mult);
-        masm.cmpq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
+        masm.cmpl(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
 
         masm.addq(rsp, numOfAAddressOnStack*8);
@@ -386,6 +387,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         for(int i = useAsAddressRegs.length-1; i >=0; i--) {
             masm.pop(useAsAddressRegs[i]);
         }
+
+        // Pop B
+        masm.pop(loopIndex);
 
         // Store partial results in result array
         masm.movl(loopIndex, 0);
@@ -403,15 +407,17 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
         // Make sure to not use debugLog for testing, it increases compile time
+        /*
         try{
             debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
         } catch (Exception e) {
             System.out.println(e);
         }
+        */
 
         exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
-        ExprDag.printDAG(debugLog, exprDag.getRootNode());
-        debugLog.write("\n");
+        //ExprDag.printDAG(debugLog, exprDag.getRootNode());
+        //debugLog.write("\n");
 
         //debugLog.write(mLength + "\n");
         //debugLog.write(kLength + "\n");
@@ -441,7 +447,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
         kPanelSizeIndexFromBehind = useAsAddressRegs.length - kPanelSizeIndexFromBehind - 1;
 
-        masm.push(iPos);
         masm.push(kPanelSize);
 
         // Check if kPanelSize overflows bounds.
@@ -468,40 +473,46 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         masm.bind(loopLabel);
 
+        /*
         int tempALength = initialALength;
-        if(tempALength == 12) {
+        if(tempALength > 8) {
             tempALength = 8;
         }
         else {
             tempALength /= 2;
         }
+        */
+        int tempALength = initialALength - 1;
 
         while(tempALength > 0) {
             masm.movq(tempArrayAddressReg, iPos);
             masm.addq(tempArrayAddressReg, tempALength);
 
-            loopLabel = new Label();
+            Label loopLabel2 = new Label();
             // Check if iPos + tempALength > mLength
             masm.cmpl(tempArrayAddressReg, mLength);
-            masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
+            masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel2);
+            //if(tempALength == 1 || tempALength == 2)  {
+                //emitKernelCode(masm, tempALength, initialBLength);
+            //}
+
             emitKernelCode(masm, tempALength, initialBLength);
-            masm.addq(iPos, tempALength);
-            masm.bind(loopLabel);
+            masm.jmp(endLabel);
+            //masm.addl(iPos, tempALength);
+            masm.bind(loopLabel2);
 
-            tempALength /= 2;
+            //tempALength /= 2;
+            tempALength -= 1;
         }
-
 
         masm.bind(endLabel);
 
         // Pop arguments + B
-        masm.addq(rsp, constArgsStackSize + varArgsStackSize + 8);
+        masm.addq(rsp, constArgsStackSize + varArgsStackSize);
 
         // Restore original value of kPanelSize
         masm.pop(kPanelSize);
 
-        masm.pop(iPos);
-
-        debugLog.close();
+        //debugLog.close();
     }
 }
