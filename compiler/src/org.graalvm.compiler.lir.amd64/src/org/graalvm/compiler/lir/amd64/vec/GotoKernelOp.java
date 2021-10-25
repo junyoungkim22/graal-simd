@@ -152,6 +152,128 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         return null;
     }
 
+    private void emitAtBKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
+        // Declare SIMD registers
+        int registerIndex = 0;
+        HashMap<String, Integer> simdRegisters= new HashMap<String, Integer>();
+        for(int i = 0; i < aLength; i++) {
+            for(int j = 0; j < bLength; j++) {
+                simdRegisters.put("C" + String.valueOf(i) + String.valueOf(j), registerIndex++);
+            }
+        }
+
+        simdRegisters.put("A", registerIndex++);
+        for(int i = 0; i < bLength; i++) {
+            simdRegisters.put("B" + String.valueOf(i), registerIndex++);
+        }
+
+        tempRegNums = new int[xmmRegistersAVX512.length - registerIndex];
+        for(int i = 0; i < tempRegNums.length; i++) {
+            tempRegNums[i] = registerIndex++;
+        }
+
+        Register tempGenReg = asRegister(remainingRegValues[remainingRegisterNum-1]);
+
+        AMD64Address resultAddress, aAddress, bAddress;
+
+        // Store previous values of the result array into SIMD registers
+        masm.movq(loopIndex, 0);
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
+        for(int i = 0; i < aLength; i++) {
+            resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+            masm.movq(tempArrayAddressReg, resultAddress);
+            for(int j = 0; j < bLength; j++) {
+                resultAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], resultAddress);
+            }
+        }
+
+        Register aPtr = asRegister(remainingRegValues[remainingRegisterNum-2]);
+        masm.movq(aPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
+        Register bPtr = asRegister(remainingRegValues[remainingRegisterNum-3]);
+        masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
+
+        int prefetchDistance = 16;
+        int unrollFactor = 16;
+
+        masm.movq(loopIndex, kPos);
+        masm.addq(kPanelSize, kPos);
+        masm.subq(kPanelSize, prefetchDistance);
+
+        //Register zero = asRegister(remainingRegValues[remainingRegisterNum-4]);
+        //masm.movq(zero, 0);
+
+        Label loopLabel = new Label();
+
+        masm.bind(loopLabel);
+
+        for(int i = 0; i < unrollFactor; i++) {
+            atbsubIter(aLength, bLength, i, prefetchDistance, masm, simdRegisters, aPtr, bPtr, tempGenReg);
+        }
+        masm.addq(loopIndex, unrollFactor);
+        masm.cmpq(loopIndex, kPanelSize);
+        masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
+
+        masm.addq(kPanelSize, prefetchDistance);
+
+        loopLabel = new Label();
+        masm.bind(loopLabel);
+        atbsubIter(aLength, bLength, 0, 0, masm, simdRegisters, aPtr, bPtr, tempGenReg);
+        masm.addq(loopIndex, 1);
+        masm.cmpq(loopIndex, kPanelSize);
+        masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
+
+        // Store partial results in result array
+        masm.movq(loopIndex, 0);
+        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
+        for(int i = 0; i < aLength; i++) {
+            resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
+            masm.movq(tempArrayAddressReg, resultAddress);
+            for(int j = 0; j < bLength; j++) {
+                resultAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.vmovupd(resultAddress, xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))]);
+            }
+        }
+    }
+
+    public void atbsubIter(int aLength, int bLength, int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters, Register aPtr, Register bPtr, Register tempGenReg) {
+        AMD64Address aAddress, bAddress;
+        if(prefetchDistance > 0) {
+            bAddress = new AMD64Address(bPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8)+(prefetchDistance*8));
+            masm.movq(tempArrayAddressReg, bAddress);
+            for(int j = 0; j < bLength; j++) {
+                bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.prefetcht0(bAddress);
+            }
+
+            aAddress = new AMD64Address(aPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8)+(prefetchDistance*8));
+            masm.movq(tempGenReg, aAddress);
+            for(int j = 0; j < aLength/8; j++) {
+                aAddress = new AMD64Address(tempGenReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.prefetcht0(aAddress);
+            }
+        }
+
+        bAddress = new AMD64Address(bPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
+        masm.movq(tempArrayAddressReg, bAddress);
+        for(int j = 0; j < bLength; j++) {
+            bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+            masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+        }
+
+        aAddress = new AMD64Address(aPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
+        masm.movq(tempGenReg, aAddress);
+        for(int i = 0; i < aLength; i++) {
+            aAddress = new AMD64Address(tempGenReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8));
+            //masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+            masm.movq(tempArrayAddressReg, aAddress);
+            masm.vpbroadcastq(xmmRegistersAVX512[simdRegisters.get("A")], tempArrayAddressReg);
+            for(int j = 0; j < bLength; j++) {
+                masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+            }
+        }
+    }
+
     public void subIter(int aLength, int bLength, int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters, Register[] aTempArrayAddressRegs) {
         AMD64Address aAddress, bAddress;
 
@@ -469,19 +591,11 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.cmpl(tempArrayAddressReg, mLength);
         masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
         emitKernelCode(masm, initialALength, initialBLength);
+        //emitAtBKernelCode(masm, initialALength, initialBLength);
         masm.jmp(endLabel);
 
         masm.bind(loopLabel);
 
-        /*
-        int tempALength = initialALength;
-        if(tempALength > 8) {
-            tempALength = 8;
-        }
-        else {
-            tempALength /= 2;
-        }
-        */
         int tempALength = initialALength - 1;
 
         while(tempALength > 0) {
@@ -492,16 +606,13 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             // Check if iPos + tempALength > mLength
             masm.cmpl(tempArrayAddressReg, mLength);
             masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel2);
-            //if(tempALength == 1 || tempALength == 2)  {
-                //emitKernelCode(masm, tempALength, initialBLength);
-            //}
 
             emitKernelCode(masm, tempALength, initialBLength);
+            //emitAtBKernelCode(masm, tempALength, initialBLength);
+
             masm.jmp(endLabel);
-            //masm.addl(iPos, tempALength);
             masm.bind(loopLabel2);
 
-            //tempALength /= 2;
             tempALength -= 1;
         }
 
