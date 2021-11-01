@@ -215,16 +215,16 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Register bPtr = asRegister(remainingRegValues[remainingRegisterNum-3]);
         masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
 
-        int prefetchDistance = 16;
-        int unrollFactor = 16;
+        int prefetchDistance = 0;
+        int unrollFactor = 1;
         if(interleave) {
-            prefetchDistance = 16;
-            unrollFactor = 8;
+            prefetchDistance = 8;
+            unrollFactor = 16;
         }
 
         masm.movq(loopIndex, kPos);
         masm.addq(kPanelSize, kPos);
-        masm.subq(kPanelSize, prefetchDistance);
+        masm.subq(kPanelSize, Math.max(prefetchDistance, unrollFactor));
 
         //Register zero = asRegister(remainingRegValues[remainingRegisterNum-4]);
         //masm.movq(zero, 0);
@@ -240,7 +240,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.cmpq(loopIndex, kPanelSize);
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
 
-        masm.addq(kPanelSize, prefetchDistance);
+        masm.addq(kPanelSize, Math.max(prefetchDistance, unrollFactor));
 
         loopLabel = new Label();
         masm.bind(loopLabel);
@@ -267,6 +267,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                         masm.vunpckhpd(xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+1) + String.valueOf(j/2))]);
                         resultAddress = new AMD64Address(resultPtr1, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+((j/2)*64));
                     }
+                    masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("A")], resultAddress);
                     masm.vmovupd(resultAddress, xmmRegistersAVX512[simdRegisters.get("A")]);
                 }
             }
@@ -296,7 +297,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
             aAddress = new AMD64Address(aPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8)+(prefetchDistance*8));
             masm.movq(tempGenReg, aAddress);
-            for(int j = 0; j < aLength/8; j++) {
+            for(int j = 0; j < (int) Math.ceil((double) aLength/8); j++) {
                 aAddress = new AMD64Address(tempGenReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
                 masm.prefetcht0(aAddress);
             }
@@ -325,7 +326,17 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 aAddress = new AMD64Address(tempGenReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8));
                 masm.vbroadcastf32x4(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
                 for(int j = 0; j < bLength*2; j++) {
-                    masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                    Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
+                    Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
+                    debugLog.println("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2));
+                    Register cRegister = null;
+                    try {
+                        cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
+                    } catch (Exception e) {
+                        debugLog.close();
+                    }
+                    masm.vfmadd231pd(cRegister, aRegister, bRegister);
+                    //masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
             }
         }
@@ -690,6 +701,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         // Restore original value of kPanelSize
         masm.pop(kPanelSize);
 
-        //debugLog.close();
+        debugLog.close();
     }
 }

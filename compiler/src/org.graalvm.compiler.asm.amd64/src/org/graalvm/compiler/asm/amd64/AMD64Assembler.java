@@ -5053,6 +5053,15 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(dst, src, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    // vbroadcastf32x4
+    public final void vbroadcastf32x4(Register dst, AMD64Address src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F38.W0 1A /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W0, Z0, B0);
+        emitByte(0x1A);
+        emitOperandHelper(dst, src, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
     // _mm512_i32gather_epi32
     public final void vpgatherdd(Register dst, Register mask, AMD64Address src) {
         assert supports(CPUFeature.AVX512F);
@@ -5107,6 +5116,33 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         // Code: EVEX.512.66.0F.W1 EF /r
         evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
         emitByte(0xEF);
+        emitModRM(dst, b);
+    }
+
+    // vmovddup
+    public final void vmovddup(Register dst, AMD64Address src) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.F2.0F.W1 12 /r
+        evexPrefix(dst, Register.None, Register.None, src, AVXSize.ZMM, P_F2, M_0F, W1, Z0, B0);
+        emitByte(0x12);
+        emitOperandHelper(dst, src, 0, EVEXTuple.FVM.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
+    // vunpcklpd
+    public final void vunpcklpd(Register dst, Register a, Register b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 14 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x14);
+        emitModRM(dst, b);
+    }
+
+    // vunpckhpd
+    public final void vunpckhpd(Register dst, Register a, Register b) {
+        assert supports(CPUFeature.AVX512F);
+        // Code: EVEX.512.66.0F.W1 15 /r
+        evexPrefix(dst, Register.None, a, b, AVXSize.ZMM, P_66, M_0F, W1, Z0, B0);
+        emitByte(0x15);
         emitModRM(dst, b);
     }
 }
