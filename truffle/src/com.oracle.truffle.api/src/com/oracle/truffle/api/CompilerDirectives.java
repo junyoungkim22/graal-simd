@@ -619,10 +619,16 @@ public final class CompilerDirectives {
 	double[][] result = (double[][]) arrs[2];
 	int aLength = (int) constArgs[0];
 	int bLength = (int) constArgs[1];
+	int kernelType = (int) constArgs[constArgs.length-1];
         for(int kk = k; kk < k+kPanelSize; kk++) {
             for(int ii = i; ii < i+aLength; ii++) {
                 for(int jj = j; jj < j+bLength; jj++) {
-                    result[ii][jj] += a[ii][kk]*b[kk][jj];
+                    switch(kernelType) {
+                        case 0: result[ii][jj] += a[ii][kk]*b[kk][jj];
+                            break;
+                        case 1: result[ii][jj] += a[kk][ii]*b[kk][jj];
+                            break;
+                    }
                 }
             }
         }

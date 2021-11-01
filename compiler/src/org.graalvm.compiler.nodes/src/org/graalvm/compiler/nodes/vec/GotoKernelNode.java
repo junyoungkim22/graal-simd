@@ -60,8 +60,9 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    int mLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int kLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int nLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+	    int kernelType = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), aLength, bLength, mLength, kLength, nLength, argLong, constDoubleArgs, varArgProperties);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), kernelType, aLength, bLength, mLength, kLength, nLength, argLong, constDoubleArgs, varArgProperties);
     }
 }

@@ -72,6 +72,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     int aTempArrayAddressNumLimit;
     final int constArgStackSlotSize;
 
+    final int kernelType;
     final int mLength, kLength, nLength;
     final int initialALength;
     final int initialBLength;
@@ -94,7 +95,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     public static PrintWriter debugLog;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
+                                    Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         super(TYPE);
 
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
@@ -118,6 +119,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         kValue = k;
         jValue = j;
 
+        this.kernelType = kernelType;
         this.mLength = mLength;
         this.kLength = kLength;
         this.nLength = nLength;
@@ -197,18 +199,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
 
         masm.movq(loopIndex, 0);
-        // Store previous values of the result array into SIMD registers
-        /*
-        masm.movq(tempGenReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+16));
-        for(int i = 0; i < aLength; i++) {
-            resultAddress = new AMD64Address(tempGenReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(i*8));
-            masm.movq(tempArrayAddressReg, resultAddress);
-            for(int j = 0; j < bLength; j++) {
-                resultAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
-                masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], resultAddress);
-            }
-        }
-        */
 
         Register aPtr = asRegister(remainingRegValues[remainingRegisterNum-2]);
         masm.movq(aPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
@@ -225,9 +215,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.movq(loopIndex, kPos);
         masm.addq(kPanelSize, kPos);
         masm.subq(kPanelSize, Math.max(prefetchDistance, unrollFactor));
-
-        //Register zero = asRegister(remainingRegValues[remainingRegisterNum-4]);
-        //masm.movq(zero, 0);
 
         Label loopLabel = new Label();
 
@@ -329,14 +316,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                     Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
                     Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
                     debugLog.println("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2));
-                    Register cRegister = null;
-                    try {
-                        cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
-                    } catch (Exception e) {
-                        debugLog.close();
-                    }
+                    Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
                     masm.vfmadd231pd(cRegister, aRegister, bRegister);
-                    //masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
             }
         }
@@ -441,7 +422,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
     }
 
-    private void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
+    private void emitABKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum+useAsAddressRegs.length ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
@@ -605,6 +586,20 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         }
     }
 
+    private void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
+        switch(kernelType) {
+            case 0:
+                emitABKernelCode(masm, aLength, bLength);
+                break;
+            case 1:
+                // Todo: Fix A^TB Kernel when A is odd
+                if(aLength == initialALength) {
+                    emitAtBKernelCode(masm, aLength, bLength);
+                }
+                break;
+        }
+    }
+
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
         // Make sure to not use debugLog for testing, it increases compile time
@@ -667,8 +662,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         Label loopLabel = new Label();
         masm.cmpl(tempArrayAddressReg, mLength);
         masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
-        //emitKernelCode(masm, initialALength, initialBLength);
-        emitAtBKernelCode(masm, initialALength, initialBLength);
+        emitKernelCode(masm, initialALength, initialBLength);
+        //emitAtBKernelCode(masm, initialALength, initialBLength);
         masm.jmp(endLabel);
 
         masm.bind(loopLabel);
@@ -684,7 +679,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             masm.cmpl(tempArrayAddressReg, mLength);
             masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel2);
 
-            //emitKernelCode(masm, tempALength, initialBLength);
+            emitKernelCode(masm, tempALength, initialBLength);
             //emitAtBKernelCode(masm, tempALength, initialBLength);
 
             masm.jmp(endLabel);
