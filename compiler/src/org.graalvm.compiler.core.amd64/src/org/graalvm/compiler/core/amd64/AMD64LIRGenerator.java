@@ -111,7 +111,7 @@ import org.graalvm.compiler.lir.amd64.vec.SimdDoubleFmaddOp;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel2x8Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel8x16Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel1D2x8Op;
-import org.graalvm.compiler.lir.amd64.vec.GotoKernelOp;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernelOp;
 import org.graalvm.compiler.lir.amd64.vector.AMD64VectorCompareOp;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.lir.gen.LIRGenerator;

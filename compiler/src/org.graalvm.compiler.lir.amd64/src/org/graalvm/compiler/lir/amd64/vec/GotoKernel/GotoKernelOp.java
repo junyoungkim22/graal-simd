@@ -1,4 +1,4 @@
-package org.graalvm.compiler.lir.amd64.vec;
+package org.graalvm.compiler.lir.amd64.vec.GotoKernel;
 
 import static jdk.vm.ci.amd64.AMD64.k0;
 import static jdk.vm.ci.amd64.AMD64.k1;
@@ -43,11 +43,15 @@ import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
 import org.graalvm.compiler.lir.amd64.vec.dag.ExprDag;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernel;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoABKernel;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoATBKernel;
 
-@Opcode("GOTOKERNEL8X8")
+@Opcode("GOTOKERNEL")
 public final class GotoKernelOp extends AMD64LIRInstruction {
     public static final LIRInstructionClass<GotoKernelOp> TYPE = LIRInstructionClass.create(GotoKernelOp.class);
 
+    /*
     private static int opLength = 5;
 
     private final int DOUBLE_ARRAY_BASE_OFFSET;
@@ -59,14 +63,17 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private final String opStringRaw;
     private final double[] constArgs;
     private final int[] varArgProperties;
+    */
+    private GotoKernel gotoKernel;
 
-    @Alive({REG}) private Value arrsValue;
+    @Alive({REG}) Value arrsValue;
 
-    @Temp({REG}) private Value kPanelSizeValue;
-    @Temp({REG}) private Value iValue;
-    @Temp({REG}) private Value kValue;
-    @Temp({REG}) private Value jValue;
+    @Temp({REG}) Value kPanelSizeValue;
+    @Temp({REG}) Value iValue;
+    @Temp({REG}) Value kValue;
+    @Temp({REG}) Value jValue;
 
+    /*
     int stackOffsetToConstArgs;
     int constArgsStackSize;
     int aTempArrayAddressNumLimit;
@@ -77,11 +84,13 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     final int initialALength;
     final int initialBLength;
     final int remainingRegisterNum;
+    */
 
-    @Temp({REG}) private Value loopIndexValue;
-    @Temp({REG}) private Value tempArrayAddressRegValue;
-    @Temp({REG}) private Value[] remainingRegValues;
+    @Temp({REG}) Value loopIndexValue;
+    @Temp({REG}) Value tempArrayAddressRegValue;
+    @Temp({REG}) Value[] remainingRegValues;
 
+    /*
     Register arrsPtr, kPanelSize, iPos, kPos, jPos, loopIndex, tempArrayAddressReg;
 
     int kPanelSizeIndexFromBehind;
@@ -93,11 +102,22 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     private ExprDag exprDag;
 
     public static PrintWriter debugLog;
+    */
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         super(TYPE);
 
+        switch(kernelType) {
+            case 0: // AB
+                this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+                break;
+            case 1: // A^TB
+                this.gotoKernel = new GotoATBKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+        }
+
+        //this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+        /*
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
         DOUBLE_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Double)));
 
@@ -112,6 +132,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         this.constArgs = constArgs;
         this.varArgProperties = varArgProperties;
+        */
 
         arrsValue = arrs;
         kPanelSizeValue = kPanelSize;
@@ -119,6 +140,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         kValue = k;
         jValue = j;
 
+        /*
         this.kernelType = kernelType;
         this.mLength = mLength;
         this.kLength = kLength;
@@ -129,17 +151,22 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         constArgStackSlotSize = 32;  // Causes an error if value if 8 (do not know reason why)
 
         remainingRegisterNum = 7;
+        */
 
         loopIndexValue = tool.newVariable(LIRKind.value(AMD64Kind.DWORD));
         tempArrayAddressRegValue = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
-        remainingRegValues = new Value[remainingRegisterNum];
-        for(int index = 0; index < remainingRegisterNum; index++) {
+        remainingRegValues = new Value[gotoKernel.remainingRegisterNum];
+        for(int index = 0; index < gotoKernel.remainingRegisterNum; index++) {
             remainingRegValues[index] = tool.newVariable(LIRKind.value(AMD64Kind.QWORD));
         }
 
+        /*
         variableArgsStackOffsets = new HashMap<Integer, Integer>();
         varArgsStackSize = 0;
+        */
     }
+
+    /*
 
     private static Boolean registerEquals(Register a, Register b) {
         return a.name.equals(b.name);
@@ -599,9 +626,12 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
                 break;
         }
     }
+    */
 
     @Override
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+        gotoKernel.emitCode(crb, masm);
+        /*
         // Make sure to not use debugLog for testing, it increases compile time
         try{
             debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
@@ -616,12 +646,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         //debugLog.write(mLength + "\n");
         //debugLog.write(kLength + "\n");
         //debugLog.write(nLength + "\n");
-        /*
         if(debugLog != null) {
             debugLog.close();
             return;
         }
-        */
 
         arrsPtr = asRegister(arrsValue);
         kPanelSize = asRegister(kPanelSizeValue);
@@ -630,6 +658,14 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         jPos = asRegister(jValue);
         loopIndex = asRegister(loopIndexValue);
         tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
+
+        gotoKernel.arrsPtr = asRegister(arrsValue);
+        gotoKernel.kPanelSize = asRegister(kPanelSizeValue);
+        gotoKernel.iPos = asRegister(iValue);
+        gotoKernel.kPos = asRegister(kValue);
+        gotoKernel.jPos = asRegister(jValue);
+        gotoKernel.loopIndex = asRegister(loopIndexValue);
+        gotoKernel.tempArrayAddressReg = asRegister(tempArrayAddressRegValue);
 
         // Make sure that iPos is first!
         useAsAddressRegs = new Register[]{iPos, arrsPtr, kPos, r15, kPanelSize};
@@ -653,7 +689,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.subq(kPanelSize, kPos);
 
         // Push arguments in reverse order
-        pushArguments(masm);
+        gotoKernel.pushArguments(masm);
 
         masm.movq(tempArrayAddressReg, iPos);
         masm.addq(tempArrayAddressReg, initialALength);
@@ -697,5 +733,6 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         masm.pop(kPanelSize);
 
         debugLog.close();
+        */
     }
 }
