@@ -70,10 +70,14 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
 
         switch(kernelType) {
             case 0: // AB
-                this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+                this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, false);
                 break;
             case 1: // A^TB
                 this.gotoKernel = new GotoATBKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+                break;
+            case 3:
+                this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, true);
+                break;
         }
 
         arrsValue = arrs;

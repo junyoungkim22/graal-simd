@@ -5072,6 +5072,16 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(dst, src, 0, EVEXTuple.T1S_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
+    // vpgatherqq
+    public final void vpgatherqq(Register dst, Register mask, AMD64Address src) {
+        assert supports(CPUFeature.AVX512F);
+        assert inRC(MASK, mask);
+        // Code: EVEX.512.66.0F38.W1 91 /vsib
+        evexPrefix(dst, mask, Register.None, src, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0x91);
+        emitOperandHelper(dst, src, 0, EVEXTuple.T1S_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
     // _mm512_i32scatter_epi32
     public final void vpscatterdd(AMD64Address dst, Register mask, Register src) {
         assert supports(CPUFeature.AVX512F);
@@ -5079,6 +5089,26 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         // Code: EVEX.512.66.0F38.W0 A0 /vsib
         evexPrefix(src, mask, Register.None, dst, AVXSize.ZMM, P_66, M_0F38, W0, Z0, B0);
         emitByte(0xA0);
+        emitOperandHelper(src, dst, 0, EVEXTuple.T1S_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
+    // vpscatterqq
+    public final void vpscatterqq(AMD64Address dst, Register mask, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        assert inRC(MASK, mask);
+        // Code: EVEX.512.66.0F38.W1 A1 /vsib
+        evexPrefix(src, mask, Register.None, dst, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xA1);
+        emitOperandHelper(src, dst, 0, EVEXTuple.T1S_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
+    }
+
+    // vscatterqpd
+    public final void vscatterqpd(AMD64Address dst, Register mask, Register src) {
+        assert supports(CPUFeature.AVX512F);
+        assert inRC(MASK, mask);
+        // Code: EVEX.512.66.0F38.W1 A3 /vsib
+        evexPrefix(src, mask, Register.None, dst, AVXSize.ZMM, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xA3);
         emitOperandHelper(src, dst, 0, EVEXTuple.T1S_32BIT.getDisp8ScalingFactor(AVXSize.ZMM));
     }
 
