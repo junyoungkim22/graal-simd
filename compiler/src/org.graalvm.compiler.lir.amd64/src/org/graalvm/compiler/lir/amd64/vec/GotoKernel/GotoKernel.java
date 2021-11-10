@@ -75,6 +75,7 @@ public abstract class GotoKernel {
     Register useAsAddressRegs[];
     Register[] tempRegs;
     int[] tempRegNums;
+    Map<String, Integer> availableValues;
     Map<Integer, Integer> variableArgsStackOffsets;
     protected int varArgsStackSize;
     protected ExprDag exprDag;
@@ -112,6 +113,7 @@ public abstract class GotoKernel {
         remainingRegisterNum = 7;
 
         variableArgsStackOffsets = new HashMap<Integer, Integer>();
+        availableValues = new HashMap<String, Integer>();
         varArgsStackSize = 0;
 
         this.kernelOp = kernelOp;
@@ -175,10 +177,50 @@ public abstract class GotoKernel {
         }
     }
 
+    protected void emitSubiterCode(AMD64MacroAssembler masm) {
+        ChangeableString codeString = new ChangeableString(opStringRaw);
+        final int opLength = GotoOpCode.INDEXLENGTH;
+        while(codeString.toString().length() > 0) {
+            String op = codeString.cutOff(opLength);
+            String opType = op.substring(0, 2);
+            if(opType.equals(GotoOpCode.OP)) {
+                int dstRegNum = availableValues.get(getRegisterString(codeString));
+                int src0RegNum = availableValues.get(getRegisterString(codeString));
+                int src1RegNum = availableValues.get(getRegisterString(codeString));
+                switch(op) {
+                    case GotoOpCode.ADD:
+                        masm.vaddpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
+                        break;
+                    case GotoOpCode.MUL:
+                        masm.vmulpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
+                        break;
+                    case GotoOpCode.FMADD:
+                        masm.vfmadd231pd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
+                        break;
+                }
+            }
+        }
+    }
+
+    private String getRegisterString(ChangeableString dst) {
+        String op = dst.cutOff(GotoOpCode.INDEXLENGTH);
+        switch(op) {
+            case GotoOpCode.A:
+            case GotoOpCode.B:
+            case GotoOpCode.C:
+                return op;
+            case GotoOpCode.REG:
+            case GotoOpCode.CONSTARG:
+                return op + dst.cutOff(GotoOpCode.INDEXLENGTH);
+        }
+        return "";
+    }
+
     protected abstract void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength);
 
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
         // Make sure to not use debugLog for testing, it increases compile time
+        /*
         try{
             debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
         } catch (Exception e) {
@@ -186,6 +228,7 @@ public abstract class GotoKernel {
         }
 
         exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
+        */
         //ExprDag.printDAG(debugLog, exprDag.getRootNode());
         /*
         if(debugLog != null) {
@@ -234,7 +277,6 @@ public abstract class GotoKernel {
         masm.cmpl(tempArrayAddressReg, mLength);
         masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
         emitKernelCode(masm, initialALength, initialBLength);
-        //emitAtBKernelCode(masm, initialALength, initialBLength);
         masm.jmp(endLabel);
 
         masm.bind(loopLabel);
@@ -266,6 +308,6 @@ public abstract class GotoKernel {
         // Restore original value of kPanelSize
         masm.pop(kPanelSize);
 
-        debugLog.close();
+        //debugLog.close();
     }
 }

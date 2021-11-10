@@ -46,6 +46,7 @@ import org.graalvm.compiler.lir.amd64.vec.dag.ExprDag;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernel;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoABKernel;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoATBKernel;
+import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoABTKernel;
 
 @Opcode("GOTOKERNEL")
 public final class GotoKernelOp extends AMD64LIRInstruction {
@@ -75,7 +76,10 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             case 1: // A^TB
                 this.gotoKernel = new GotoATBKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
                 break;
-            case 3:
+            case 2: // AB^T
+                this.gotoKernel = new GotoABTKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this);
+                break;
+            case 3: // A^TB^T
                 this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, true);
                 break;
         }

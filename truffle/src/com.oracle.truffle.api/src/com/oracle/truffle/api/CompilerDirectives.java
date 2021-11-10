@@ -628,6 +628,8 @@ public final class CompilerDirectives {
                             break;
                         case 1: result[ii][jj] += a[kk][ii]*b[kk][jj];
                             break;
+                        case 2: result[ii][jj] += a[ii][kk]*b[jj][kk];
+                            break;
                         case 3: result[jj][ii] += a[ii][kk]*b[kk][jj];
                             break;
                     }
