@@ -90,16 +90,26 @@ public final class GotoATBKernel extends GotoKernel {
         aAddress = new AMD64Address(aPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
         masm.movq(tempArrayAddressReg, aAddress);
 
+        availableValues.put(GotoOpCode.A, simdRegisters.get("A"));
+
         if(interleave) {
             for(int i = 0; i < aLength; i+=2) {
                 aAddress = new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8));
                 masm.vbroadcastf32x4(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
                 for(int j = 0; j < bLength*2; j++) {
-                    Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
-                    Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
+                    //Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
+                    //Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
+                    availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
+                    availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2)));
                     //debugLog.println("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2));
-                    Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
-                    masm.vfmadd231pd(cRegister, aRegister, bRegister);
+                    //Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
+                    //masm.vfmadd231pd(cRegister, aRegister, bRegister);
+                    for(int k = 0; k < varArgProperties.length; k++) {
+                        if(varArgProperties[k] == 2) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
+                    }
+                    emitSubiterCode(masm);
                 }
             }
         }
@@ -111,7 +121,15 @@ public final class GotoATBKernel extends GotoKernel {
                 masm.movq(tempGenReg, aAddress);
                 masm.vpbroadcastq(xmmRegistersAVX512[simdRegisters.get("A")], tempGenReg);
                 for(int j = 0; j < bLength; j++) {
-                    masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                    availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
+                    availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
+                    for(int k = 0; k < varArgProperties.length; k++) {
+                        if(varArgProperties[k] == 2) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
+                    }
+                    emitSubiterCode(masm);
+                    //masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
             }
         }
@@ -141,6 +159,23 @@ public final class GotoATBKernel extends GotoKernel {
                 simdRegisters.put("B" + String.valueOf(i), registerIndex++);
             }
         }
+        for(int i = 0; i < varArgProperties.length; i++) {
+            if(varArgProperties[i] == 2) {
+                if(interleave) {
+                    for(int j = 0; j < bLength*2; j++) {
+                        simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
+                    }
+                }
+                else {
+                    for(int j = 0; j < bLength; j++) {
+                        simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
+                    }
+                }
+            }
+        }
+        for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
+            availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+        }
 
         tempRegNums = new int[xmmRegistersAVX512.length - registerIndex];
         for(int i = 0; i < tempRegNums.length; i++) {
@@ -168,6 +203,22 @@ public final class GotoATBKernel extends GotoKernel {
         masm.movq(aPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
         Register bPtr = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-3]);
         masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
+
+        for(int i = 0; i < varArgProperties.length; i++) {
+            if(varArgProperties[i] == 2) {
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(i);
+                if(interleave) {
+                    for(int j = 0; j < bLength*2; j++) {
+                        masm.vmovddup(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))], new AMD64Address(rsp, varArgOffset+((j/2)*64)+((j%2)*8)));
+                    }
+                }
+                else {
+                    for(int j = 0; j < bLength; j++) {
+                        masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))], new AMD64Address(rsp, varArgOffset+64*j));
+                    }
+                }
+            }
+        }
 
         int prefetchDistance = 8;
         int unrollFactor = 16;
