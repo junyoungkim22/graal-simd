@@ -92,6 +92,11 @@ public final class GotoABKernel extends GotoKernel {
             for(int j = 0; j < bLength; j++) {
                 availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
+                for(int k = 0; k < varArgProperties.length; k++) {
+                    if(varArgProperties[k] == 2) {
+                        availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                    }
+                }
                 emitSubiterCode(masm);
             }
         }
@@ -139,6 +144,13 @@ public final class GotoABKernel extends GotoKernel {
         */
         for(int i = 0; i < constArgs.length; i++) {
             availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+        }
+        for(int i = 0; i < varArgProperties.length; i++) {
+            if(varArgProperties[i] == 2) {
+                for(int j = 0; j < bLength; j++) {
+                    simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
+                }
+            }
         }
         for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
             availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
@@ -221,13 +233,13 @@ public final class GotoABKernel extends GotoKernel {
         int prefetchDistance = 4;
         int mult = 8;
 
-        if(varArgProperties.length > 0) {
-            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(0);
-            //masm.vmovupd(xmmRegistersAVX512[tempRegNums[0]], new AMD64Address(rsp, varArgOffset));
-            //masm.vmovupd(xmmRegistersAVX512[tempRegNums[1]], new AMD64Address(rsp, varArgOffset+64));
-            //varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(1);
-            //masm.vmovupd(xmmRegistersAVX512[tempRegNums[2]], new AMD64Address(rsp, varArgOffset));
-            //masm.vmovupd(xmmRegistersAVX512[tempRegNums[3]], new AMD64Address(rsp, varArgOffset+64));
+        for(int i = 0; i < varArgProperties.length; i++) {
+            if(varArgProperties[i] == 2) {
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(i);
+                for(int j = 0; j < bLength; j++) {
+                    masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))], new AMD64Address(rsp, varArgOffset+64*j));
+                }
+            }
         }
 
         for(int i = 0; i < constArgs.length; i++) {

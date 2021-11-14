@@ -199,6 +199,36 @@ public abstract class GotoKernel {
                         break;
                 }
             }
+            else if(opType.equals(GotoOpCode.CMPOP)) {
+                //int dstRegNum = availableValues.get(getRegisterString(codeString));
+                getRegisterString(codeString);
+                int src0RegNum = availableValues.get(getRegisterString(codeString));
+                int src1RegNum = availableValues.get(getRegisterString(codeString));
+
+                int cmpOperation = 0;
+                switch(op) {
+                    case GotoOpCode.LT:
+                        cmpOperation = 1;
+                        break;
+                    case GotoOpCode.GT:
+                        cmpOperation = 0x0e;
+                        break;
+                }
+                masm.vcmppd(k2, xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum], cmpOperation);
+            }
+            else if(opType.equals(GotoOpCode.MASKOP)) {
+                //int maskRegNum = availableValues.get(getRegisterString(codeString));
+                getRegisterString(codeString);
+                int dstRegNum = availableValues.get(getRegisterString(codeString));
+                int src0RegNum = availableValues.get(getRegisterString(codeString));
+                int src1RegNum = availableValues.get(getRegisterString(codeString));
+                // Todo: Parse mask register
+                switch(op) {
+                    case GotoOpCode.MASKADD:
+                        masm.vaddpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum], k2);
+                        break;
+                }
+            }
         }
     }
 
@@ -210,7 +240,9 @@ public abstract class GotoKernel {
             case GotoOpCode.C:
                 return op;
             case GotoOpCode.REG:
+            case GotoOpCode.MASKREG:
             case GotoOpCode.CONSTARG:
+            case GotoOpCode.VARIABLEARG:
                 return op + dst.cutOff(GotoOpCode.INDEXLENGTH);
         }
         return "";
@@ -226,6 +258,8 @@ public abstract class GotoKernel {
         } catch (Exception e) {
             System.out.println(e);
         }
+        */
+        /*
 
         exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
         */
@@ -291,9 +325,7 @@ public abstract class GotoKernel {
             // Check if iPos + tempALength > mLength
             masm.cmpl(tempArrayAddressReg, mLength);
             masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel2);
-            if(kernelType != 1) {
-                emitKernelCode(masm, tempALength, initialBLength);
-            }
+            emitKernelCode(masm, tempALength, initialBLength);
             masm.jmp(endLabel);
             masm.bind(loopLabel2);
 

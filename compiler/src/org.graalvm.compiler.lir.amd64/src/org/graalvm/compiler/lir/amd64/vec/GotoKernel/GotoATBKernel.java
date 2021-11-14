@@ -97,18 +97,19 @@ public final class GotoATBKernel extends GotoKernel {
                 for(int j = 0; j < bLength*2; j++) {
                     Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
                     Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
-                    debugLog.println("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2));
+                    //debugLog.println("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2));
                     Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))];
                     masm.vfmadd231pd(cRegister, aRegister, bRegister);
                 }
             }
         }
         else {
+            Register tempGenReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-1]);
             for(int i = 0; i < aLength; i++) {
                 aAddress = new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8));
                 //masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
-                masm.movq(tempArrayAddressReg, aAddress);
-                masm.vpbroadcastq(xmmRegistersAVX512[simdRegisters.get("A")], tempArrayAddressReg);
+                masm.movq(tempGenReg, aAddress);
+                masm.vpbroadcastq(xmmRegistersAVX512[simdRegisters.get("A")], tempGenReg);
                 for(int j = 0; j < bLength; j++) {
                     masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
@@ -118,6 +119,9 @@ public final class GotoATBKernel extends GotoKernel {
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         // Declare SIMD registers
+        if(aLength % 2 == 1) {
+            interleave = false;
+        }
         int registerIndex = 0;
         HashMap<String, Integer> simdRegisters= new HashMap<String, Integer>();
         for(int i = 0; i < aLength; i++) {
@@ -165,8 +169,8 @@ public final class GotoATBKernel extends GotoKernel {
         Register bPtr = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-3]);
         masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
 
-        int prefetchDistance = 0;
-        int unrollFactor = 1;
+        int prefetchDistance = 8;
+        int unrollFactor = 16;
         if(interleave) {
             prefetchDistance = 8;
             unrollFactor = 16;
