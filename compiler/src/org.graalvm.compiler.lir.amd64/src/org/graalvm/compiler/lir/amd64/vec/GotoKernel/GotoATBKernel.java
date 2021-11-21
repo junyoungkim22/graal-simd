@@ -204,6 +204,8 @@ public final class GotoATBKernel extends GotoKernel {
         Register bPtr = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-3]);
         masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
 
+        // Todo: Add loading constargs
+
         for(int i = 0; i < varArgProperties.length; i++) {
             if(varArgProperties[i] == 2) {
                 int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(i);
