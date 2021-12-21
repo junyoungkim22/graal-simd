@@ -48,6 +48,7 @@ import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernel;
 
 public final class GotoABKernel extends GotoKernel {
     public Boolean transposeResult;
+    private Register[] aTempArrayAddressRegs;
 
     public GotoABKernel(LIRGeneratorTool tool, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength,
                         long[] calc, double[] constArgs, int[] varArgProperties, GotoKernelOp kernelOp, Boolean transpose) {
@@ -55,7 +56,7 @@ public final class GotoABKernel extends GotoKernel {
         this.transposeResult = transpose;
     }
 
-    public void subIter(int aLength, int bLength, int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters, Register[] aTempArrayAddressRegs) {
+    public void subIter(int aLength, int bLength, int offset, int prefetchDistance, AMD64MacroAssembler masm, Map<String, Integer> simdRegisters) {
         AMD64Address aAddress, bAddress;
 
         if(prefetchDistance > 0) {
@@ -76,19 +77,14 @@ public final class GotoABKernel extends GotoKernel {
             masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
         }
 
-        //HashMap<String, Integer> availableValues = new HashMap<String, Integer>();
-        availableValues.put(GotoOpCode.A, simdRegisters.get("A"));
+        if(!toLoad.contains(GotoOpCode.A)) {
+            availableValues.put(GotoOpCode.A, simdRegisters.get("A"));
+        }
 
         for(int i = 0; i < aLength; i++) {
-            if(i < aTempArrayAddressNumLimit) {
-                aAddress = new AMD64Address(aTempArrayAddressRegs[i], loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
+            if(!toLoad.contains(GotoOpCode.A)) {
+                loadA(masm, i, offset, simdRegisters.get("A"));
             }
-            else {
-                // Todo: read from stack
-                masm.movq(tempArrayAddressReg, new AMD64Address(rsp, 8*(i-aTempArrayAddressNumLimit)));
-                aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
-            }
-            masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
             for(int j = 0; j < bLength; j++) {
                 availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
@@ -97,14 +93,27 @@ public final class GotoABKernel extends GotoKernel {
                         availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
                     }
                 }
-                emitSubiterCode(masm);
+                emitSubiterCode(masm, i, j, offset);
             }
         }
     }
 
+    protected void loadA(AMD64MacroAssembler masm, int iIndex, int offset, int dstRegNum) {
+        AMD64Address aAddress;
+        if(iIndex < aTempArrayAddressNumLimit) {
+            aAddress = new AMD64Address(aTempArrayAddressRegs[iIndex], loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
+        }
+        else {
+            // Todo: read from stack
+            masm.movq(tempArrayAddressReg, new AMD64Address(rsp, 8*(iIndex-aTempArrayAddressNumLimit)));
+            aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
+        }
+        masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], aAddress);
+    }
+
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum+useAsAddressRegs.length ? aLength : remainingRegisterNum+useAsAddressRegs.length;
-        Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];
+        aTempArrayAddressRegs = new Register[aTempArrayAddressNumLimit];
         for(int i = 0; i < aTempArrayAddressNumLimit; i++) {
             if(i < useAsAddressRegs.length) {
                 aTempArrayAddressRegs[i] = findRegister(useAsAddressRegs[i], cpuRegisters);
@@ -118,7 +127,9 @@ public final class GotoABKernel extends GotoKernel {
         int registerIndex = 0;
         HashMap<String, Integer> simdRegisters= new HashMap<String, Integer>();
 
-        simdRegisters.put("A", registerIndex++);
+        if(!toLoad.contains(GotoOpCode.A)) {
+            simdRegisters.put("A", registerIndex++);
+        }
         for(int i = 0; i < bLength; i++) {
             simdRegisters.put("B" + String.valueOf(i), registerIndex++);
         }
@@ -127,21 +138,6 @@ public final class GotoABKernel extends GotoKernel {
                 simdRegisters.put("C" + String.valueOf(i) + String.valueOf(j), registerIndex++);
             }
         }
-
-        /*
-        simdRegisters.put("A", registerIndex++);
-        for(int i = 0; i < bLength; i++) {
-            simdRegisters.put("B" + String.valueOf(i), registerIndex++);
-        }
-        */
-
-
-        /*
-        tempRegNums = new int[xmmRegistersAVX512.length - registerIndex];
-        for(int i = 0; i < tempRegNums.length; i++) {
-            tempRegNums[i] = registerIndex++;
-        }
-        */
         for(int i = 0; i < constArgs.length; i++) {
             availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
         }
@@ -152,7 +148,8 @@ public final class GotoABKernel extends GotoKernel {
                 }
             }
         }
-        for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
+        int remainingSimdRegisterNum = xmmRegistersAVX512.length - registerIndex;
+        for(int i = 0; i < remainingSimdRegisterNum; i++) {
             availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
         }
 
@@ -256,7 +253,7 @@ public final class GotoABKernel extends GotoKernel {
         // Iterate from kPos to kPos + kPanelSize-1 and store partial results in c** registers
         masm.bind(loopLabel);
         for(int i = 0; i < unrollFactor; i++) {
-            subIter(aLength, bLength, i, prefetchDistance, masm, simdRegisters, aTempArrayAddressRegs);
+            subIter(aLength, bLength, i, prefetchDistance, masm, simdRegisters);
         }
         masm.addq(loopIndex, unrollFactor*mult);
         masm.cmpq(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
@@ -266,7 +263,7 @@ public final class GotoABKernel extends GotoKernel {
 
         loopLabel = new Label();
         masm.bind(loopLabel);
-        subIter(aLength, bLength, 0, 0, masm, simdRegisters, aTempArrayAddressRegs);
+        subIter(aLength, bLength, 0, 0, masm, simdRegisters);
         masm.addq(loopIndex, mult);
         masm.cmpl(loopIndex, new AMD64Address(rsp, (numOfAAddressOnStack*8)+(8*kPanelSizeIndexFromBehind)));
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);

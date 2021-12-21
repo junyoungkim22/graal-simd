@@ -109,7 +109,7 @@ public final class GotoATBKernel extends GotoKernel {
                             availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
                         }
                     }
-                    emitSubiterCode(masm);
+                    emitSubiterCode(masm, i, j, offset);
                 }
             }
         }
@@ -128,11 +128,15 @@ public final class GotoATBKernel extends GotoKernel {
                             availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
                         }
                     }
-                    emitSubiterCode(masm);
+                    emitSubiterCode(masm, i, j, offset);
                     //masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
             }
         }
+    }
+
+    protected void loadA(AMD64MacroAssembler masm, int iIndex, int offset, int dstRegNum) {
+        return;
     }
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {

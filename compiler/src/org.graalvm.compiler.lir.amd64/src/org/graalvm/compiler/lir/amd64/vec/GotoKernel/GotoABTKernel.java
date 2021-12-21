@@ -103,7 +103,7 @@ public final class GotoABTKernel extends GotoKernel {
                 Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
                 Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
                 Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))];
-                emitSubiterCode(masm);
+                emitSubiterCode(masm, i, j, offset);
                 //masm.vaddpd(cRegister, aRegister, cRegister);
                 //masm.vaddpd(cRegister, bRegister, cRegister);
                 //masm.vmovupd(cRegister, bRegister);
@@ -116,6 +116,10 @@ public final class GotoABTKernel extends GotoKernel {
                 */
             }
         }
+    }
+
+    protected void loadA(AMD64MacroAssembler masm, int iIndex, int offset, int dstRegNum) {
+        return;
     }
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {

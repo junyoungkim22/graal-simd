@@ -13,6 +13,7 @@ public final class GotoOpCode {
     public static final String FMADD = OP + "010";
     public static final String SUB = OP + "011";
     public static final String DIV = OP + "100";
+    public static final String LOAD = OP + "101";
 
     public static final String MASKMUL = MASKOP + "000";
     public static final String MASKADD = MASKOP + "001";

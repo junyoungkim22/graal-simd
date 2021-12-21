@@ -12,8 +12,11 @@ import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
 import java.util.Objects;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.io.File;
 import java.io.PrintWriter;
+import java.io.FileWriter;
 
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.amd64.AMD64Address;
@@ -77,6 +80,7 @@ public abstract class GotoKernel {
     int[] tempRegNums;
     Map<String, Integer> availableValues;
     Map<Integer, Integer> variableArgsStackOffsets;
+    Set<String> toLoad;
     protected int varArgsStackSize;
     protected ExprDag exprDag;
 
@@ -100,6 +104,18 @@ public abstract class GotoKernel {
 
         this.constArgs = constArgs;
         this.varArgProperties = varArgProperties;
+
+        // Check loads
+        this.toLoad = new HashSet<String>();
+        for(int loadIndex = 0; loadIndex < opStringRaw.length(); loadIndex+=GotoOpCode.INDEXLENGTH) {
+            if(opStringRaw.substring(loadIndex, loadIndex + GotoOpCode.INDEXLENGTH).equals(GotoOpCode.LOAD)) {
+                String loadTarget = opStringRaw.substring(loadIndex + (GotoOpCode.INDEXLENGTH*3), loadIndex + (GotoOpCode.INDEXLENGTH*4));
+                if(loadTarget.equals(GotoOpCode.CONSTARG) || loadTarget.equals(GotoOpCode.VARIABLEARG)) {
+                    loadTarget += opStringRaw.substring(loadIndex + (GotoOpCode.INDEXLENGTH*4), loadIndex + (GotoOpCode.INDEXLENGTH*5));
+                }
+                toLoad.add(loadTarget);
+            }
+        }
 
         this.kernelType = kernelType;
         this.mLength = mLength;
@@ -177,13 +193,24 @@ public abstract class GotoKernel {
         }
     }
 
-    protected void emitSubiterCode(AMD64MacroAssembler masm) {
+    protected abstract void loadA(AMD64MacroAssembler masm, int iIndex, int offset, int dstRegNum);
+
+    protected void emitSubiterCode(AMD64MacroAssembler masm, int iIndex, int jIndex, int offset) {
         ChangeableString codeString = new ChangeableString(opStringRaw);
         final int opLength = GotoOpCode.INDEXLENGTH;
         while(codeString.toString().length() > 0) {
             String op = codeString.cutOff(opLength);
             String opType = op.substring(0, 2);
-            if(opType.equals(GotoOpCode.OP)) {
+            if(op.equals(GotoOpCode.LOAD)) {
+                int dstRegNum = availableValues.get(getRegisterString(codeString));
+                String loadType = getRegisterString(codeString);
+                switch(loadType) {
+                    case GotoOpCode.A:
+                        loadA(masm, iIndex, offset, dstRegNum);
+                        break;
+                }
+            }
+            else if(opType.equals(GotoOpCode.OP)) {
                 int dstRegNum = availableValues.get(getRegisterString(codeString));
                 int src0RegNum = availableValues.get(getRegisterString(codeString));
                 int src1RegNum = availableValues.get(getRegisterString(codeString));
@@ -251,26 +278,6 @@ public abstract class GotoKernel {
     protected abstract void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength);
 
     public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-        // Make sure to not use debugLog for testing, it increases compile time
-        /*
-        try{
-            debugLog = new PrintWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", "UTF-8");
-        } catch (Exception e) {
-            System.out.println(e);
-        }
-        */
-        /*
-
-        exprDag = new ExprDag(new ChangeableString(opStringRaw), debugLog);
-        */
-        //ExprDag.printDAG(debugLog, exprDag.getRootNode());
-        /*
-        if(debugLog != null) {
-            debugLog.close();
-            return;
-        }
-        */
-
         arrsPtr = asRegister(kernelOp.arrsValue);
         kPanelSize = asRegister(kernelOp.kPanelSizeValue);
         iPos = asRegister(kernelOp.iValue);
@@ -339,7 +346,16 @@ public abstract class GotoKernel {
 
         // Restore original value of kPanelSize
         masm.pop(kPanelSize);
+    }
 
-        //debugLog.close();
+    protected static void debugPrint(String msg) {
+        PrintWriter debugLog = null;
+        try{
+            debugLog = new PrintWriter(new FileWriter("/home/junyoung2/project/adaptive-code-generation/log.txt", true));
+        } catch (Exception e) {
+            System.out.println(e);
+        }
+        debugLog.println(msg);
+        debugLog.close();
     }
 }
