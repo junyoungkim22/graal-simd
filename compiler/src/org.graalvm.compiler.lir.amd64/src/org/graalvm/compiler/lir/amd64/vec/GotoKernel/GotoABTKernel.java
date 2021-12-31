@@ -122,6 +122,14 @@ public final class GotoABTKernel extends GotoKernel {
         return;
     }
 
+    protected void loadB(AMD64MacroAssembler masm, int jIndex, int offset, int dstRegNum) {
+        return;
+    }
+
+    protected void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum) {
+        return;
+    }
+
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         aTempArrayAddressNumLimit = aLength < remainingRegisterNum+useAsAddressRegs.length ? aLength : remainingRegisterNum+useAsAddressRegs.length;
         Register aTempArrayAddressRegs[] = new Register[aTempArrayAddressNumLimit];

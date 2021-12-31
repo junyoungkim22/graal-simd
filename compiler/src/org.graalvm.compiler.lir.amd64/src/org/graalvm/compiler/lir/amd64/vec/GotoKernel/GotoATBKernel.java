@@ -139,6 +139,14 @@ public final class GotoATBKernel extends GotoKernel {
         return;
     }
 
+    protected void loadB(AMD64MacroAssembler masm, int jIndex, int offset, int dstRegNum) {
+        return;
+    }
+
+    protected void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum) {
+        return;
+    }
+
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         // Declare SIMD registers
         if(aLength % 2 == 1) {
@@ -161,6 +169,11 @@ public final class GotoATBKernel extends GotoKernel {
         else {
             for(int i = 0; i < bLength; i++) {
                 simdRegisters.put("B" + String.valueOf(i), registerIndex++);
+            }
+        }
+        for(int i = 0; i < constArgs.length; i++) {
+            if(!toLoad.contains(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
             }
         }
         for(int i = 0; i < varArgProperties.length; i++) {
@@ -223,6 +236,12 @@ public final class GotoATBKernel extends GotoKernel {
                         masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))], new AMD64Address(rsp, varArgOffset+64*j));
                     }
                 }
+            }
+        }
+
+        for(int i = 0; i < constArgs.length; i++) {
+            if(!toLoad.contains(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                masm.vbroadcastsd(xmmRegistersAVX512[availableValues.get(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))], new AMD64Address(rsp, stackOffsetToConstArgs + constArgStackSlotSize*i));
             }
         }
 

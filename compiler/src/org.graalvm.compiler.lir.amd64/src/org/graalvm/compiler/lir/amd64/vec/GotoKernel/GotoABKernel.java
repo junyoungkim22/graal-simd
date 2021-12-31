@@ -69,12 +69,14 @@ public final class GotoABKernel extends GotoKernel {
             }
         }
 
-        bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
-        masm.movq(tempArrayAddressReg, bAddress);
+        if(!toLoad.contains(GotoOpCode.B)) {
+            bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
+            masm.movq(tempArrayAddressReg, bAddress);
 
-        for(int j = 0; j < bLength; j++) {
-            bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
-            masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+            for(int j = 0; j < bLength; j++) {
+                bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(j*64));
+                masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+            }
         }
 
         if(!toLoad.contains(GotoOpCode.A)) {
@@ -85,12 +87,22 @@ public final class GotoABKernel extends GotoKernel {
             if(!toLoad.contains(GotoOpCode.A)) {
                 loadA(masm, i, offset, simdRegisters.get("A"));
             }
+            for(int k = 0; k < varArgProperties.length; k++) {
+                if(varArgProperties[k] == 1) {
+                    loadVarArg(masm, k, i, -1, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                    availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                }
+            }
             for(int j = 0; j < bLength; j++) {
-                availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
+                if(!toLoad.contains(GotoOpCode.B)) {
+                    availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
+                }
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
                 for(int k = 0; k < varArgProperties.length; k++) {
-                    if(varArgProperties[k] == 2) {
-                        availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                    if(!toLoad.contains(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k))) {
+                        if(varArgProperties[k] == 2) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
                     }
                 }
                 emitSubiterCode(masm, i, j, offset);
@@ -109,6 +121,30 @@ public final class GotoABKernel extends GotoKernel {
             aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
         }
         masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], aAddress);
+    }
+
+    protected void loadB(AMD64MacroAssembler masm, int jIndex, int offset, int dstRegNum) {
+        AMD64Address bAddress = new AMD64Address(loopIndex, OBJECT_ARRAY_BASE_OFFSET+(offset*8));
+        masm.movq(tempArrayAddressReg, bAddress);
+
+        bAddress = new AMD64Address(tempArrayAddressReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(jIndex*64));
+        masm.vmovupd(xmmRegistersAVX512[dstRegNum], bAddress);
+    }
+
+    protected void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum) {
+        if(varArgProperties[argIndex] == 2) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+            masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+64*jIndex));
+        }
+        else if(varArgProperties[argIndex] == 1) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+
+            masm.leaq(tempArrayAddressReg, new AMD64Address(rsp, varArgOffset+8*iIndex));
+            masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempArrayAddressReg));
+
+            // Todo: optimize into the below code! (vbroadcastsd does not work for some addresses)
+            //masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+8*iIndex));
+        }
     }
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
@@ -130,8 +166,10 @@ public final class GotoABKernel extends GotoKernel {
         if(!toLoad.contains(GotoOpCode.A)) {
             simdRegisters.put("A", registerIndex++);
         }
-        for(int i = 0; i < bLength; i++) {
-            simdRegisters.put("B" + String.valueOf(i), registerIndex++);
+        if(!toLoad.contains(GotoOpCode.B)) {
+            for(int i = 0; i < bLength; i++) {
+                simdRegisters.put("B" + String.valueOf(i), registerIndex++);
+            }
         }
         for(int i = 0; i < aLength; i++) {
             for(int j = 0; j < bLength; j++) {
@@ -139,12 +177,19 @@ public final class GotoABKernel extends GotoKernel {
             }
         }
         for(int i = 0; i < constArgs.length; i++) {
-            availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+            if(!toLoad.contains(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+            }
         }
         for(int i = 0; i < varArgProperties.length; i++) {
-            if(varArgProperties[i] == 2) {
-                for(int j = 0; j < bLength; j++) {
-                    simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
+            if(!toLoad.contains(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                if(varArgProperties[i] == 2) {
+                    for(int j = 0; j < bLength; j++) {
+                        simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
+                    }
+                }
+                else if(varArgProperties[i] == 1) {
+                    simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
                 }
             }
         }
@@ -231,16 +276,19 @@ public final class GotoABKernel extends GotoKernel {
         int mult = 8;
 
         for(int i = 0; i < varArgProperties.length; i++) {
-            if(varArgProperties[i] == 2) {
-                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(i);
-                for(int j = 0; j < bLength; j++) {
-                    masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))], new AMD64Address(rsp, varArgOffset+64*j));
+            if(!toLoad.contains(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                if(varArgProperties[i] == 2) {
+                    for(int j = 0; j < bLength; j++) {
+                        loadVarArg(masm, i, -1, j, simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j)));
+                    }
                 }
             }
         }
 
         for(int i = 0; i < constArgs.length; i++) {
-            masm.vbroadcastsd(xmmRegistersAVX512[availableValues.get(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))], new AMD64Address(rsp, stackOffsetToConstArgs + constArgStackSlotSize*i));
+            if(!toLoad.contains(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))) {
+                masm.vbroadcastsd(xmmRegistersAVX512[availableValues.get(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))], new AMD64Address(rsp, stackOffsetToConstArgs + constArgStackSlotSize*i));
+            }
         }
 
         // Subtract prefetchDistance*8 from kPanelSize

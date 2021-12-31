@@ -171,10 +171,18 @@ public abstract class GotoKernel {
                 varArgsStackSize += 64;
             }
             else if(varArgProperties[i] == 1) {
-                // Todo: push 12 broadcasts to stack
-                variableArgsStackOffsets.put(i, varArgsStackSize);
+                for(int varArgIndex : variableArgsStackOffsets.keySet()) {
+                    variableArgsStackOffsets.put(varArgIndex, variableArgsStackOffsets.get(varArgIndex) + 128);
+                }
+                variableArgsStackOffsets.put(i, 0);
+
                 masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
-                masm.vbroadcastsd(tempReg, new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
+                masm.vmovupd(tempReg, new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+64));
+                masm.subq(rsp, 64);
+                masm.vmovupd(new AMD64Address(rsp), tempReg);
+                varArgsStackSize += 64;
+
+                masm.vmovupd(tempReg, new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
                 masm.subq(rsp, 64);
                 masm.vmovupd(new AMD64Address(rsp), tempReg);
                 varArgsStackSize += 64;
@@ -195,6 +203,10 @@ public abstract class GotoKernel {
 
     protected abstract void loadA(AMD64MacroAssembler masm, int iIndex, int offset, int dstRegNum);
 
+    protected abstract void loadB(AMD64MacroAssembler masm, int jIndex, int offset, int dstRegNum);
+
+    protected abstract void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum);
+
     protected void emitSubiterCode(AMD64MacroAssembler masm, int iIndex, int jIndex, int offset) {
         ChangeableString codeString = new ChangeableString(opStringRaw);
         final int opLength = GotoOpCode.INDEXLENGTH;
@@ -204,9 +216,16 @@ public abstract class GotoKernel {
             if(op.equals(GotoOpCode.LOAD)) {
                 int dstRegNum = availableValues.get(getRegisterString(codeString));
                 String loadType = getRegisterString(codeString);
-                switch(loadType) {
+                switch(loadType.substring(0, opLength)) {
                     case GotoOpCode.A:
                         loadA(masm, iIndex, offset, dstRegNum);
+                        break;
+                    case GotoOpCode.B:
+                        loadB(masm, jIndex, offset, dstRegNum);
+                        break;
+                    case GotoOpCode.VARIABLEARG:
+                        int argIndex = Integer.parseInt(loadType.substring(opLength, opLength+opLength), 2);
+                        loadVarArg(masm, argIndex, iIndex, jIndex, dstRegNum);
                         break;
                 }
             }
