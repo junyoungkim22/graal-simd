@@ -151,6 +151,8 @@ public abstract class GotoKernel {
     public void pushArguments(AMD64MacroAssembler masm) {
         Register tempReg = xmmRegistersAVX512[31];
 
+        Register tempGenReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-1]);
+
         // Push Variable arguments in reverse order
         masm.movl(loopIndex, 0);
         for(int i = varArgProperties.length-1; i>=0; i--) {
@@ -187,9 +189,70 @@ public abstract class GotoKernel {
                 masm.vmovupd(new AMD64Address(rsp), tempReg);
                 varArgsStackSize += 64;
             }
-        }
+            else if(varArgProperties[i] == 3) {  // varArg[i][j]
+                for(int varArgIndex : variableArgsStackOffsets.keySet()) {
+                    variableArgsStackOffsets.put(varArgIndex, variableArgsStackOffsets.get(varArgIndex) + 128*12);
+                }
+                variableArgsStackOffsets.put(i, 0);
 
-        Register tempGenReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-1]);
+                Register genReg1 = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-2]);
+                Register genReg2 = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-3]);
+                Register genReg3 = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-4]);
+
+                masm.movq(genReg1, mLength);
+                masm.subq(genReg1, iPos);
+
+                Label cmpLabel = new Label();
+                masm.cmpl(genReg1, 12);
+                masm.jcc(AMD64Assembler.ConditionFlag.LessEqual, cmpLabel);
+                masm.movl(genReg1, 12);
+                masm.bind(cmpLabel);
+
+                Label endLabel = new Label();
+                Label startLabel = new Label();
+
+                masm.subq(rsp, 128*12);
+                varArgsStackSize += 128*12;
+                masm.imull(genReg1, genReg1, 128);
+                masm.movq(genReg2, 0);
+                masm.movq(genReg3, iPos);
+
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
+
+                masm.bind(startLabel);
+                masm.cmpl(genReg2, genReg1);
+                masm.jcc(AMD64Assembler.ConditionFlag.GreaterEqual, endLabel);
+
+                masm.movq(tempGenReg, new AMD64Address(tempArrayAddressReg, genReg3, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET));
+
+                masm.vmovupd(tempReg, new AMD64Address(tempGenReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
+                masm.vmovupd(new AMD64Address(rsp, genReg2, AMD64Address.Scale.Times1, 0), tempReg);
+                masm.vmovupd(tempReg, new AMD64Address(tempGenReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+64));
+                masm.vmovupd(new AMD64Address(rsp, genReg2, AMD64Address.Scale.Times1, 64), tempReg);
+
+                masm.incrementl(genReg3, 1);
+                masm.incrementl(genReg2, 128);
+                masm.jmp(startLabel);
+                masm.bind(endLabel);
+
+
+                /*
+                for(int k = 11; k >= 0; k--) {
+                    masm.movq(tempGenReg, new AMD64Address(tempArrayAddressReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8*k));
+                    masm.vmovupd(tempReg, new AMD64Address(tempGenReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+64));
+                    masm.subq(rsp, 64);
+                    masm.vmovupd(new AMD64Address(rsp), tempReg);
+                    varArgsStackSize += 64;
+
+                    masm.vmovupd(tempReg, new AMD64Address(tempGenReg, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET));
+                    masm.subq(rsp, 64);
+                    masm.vmovupd(new AMD64Address(rsp), tempReg);
+                    varArgsStackSize += 64;
+                }
+                masm.movl(loopIndex, 0);
+                */
+            }
+        }
 
         // Push Constant arguments in reverse order
         constArgsStackSize = 0;

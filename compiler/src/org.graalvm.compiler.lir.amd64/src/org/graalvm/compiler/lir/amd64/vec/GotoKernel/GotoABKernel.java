@@ -103,6 +103,10 @@ public final class GotoABKernel extends GotoKernel {
                         if(varArgProperties[k] == 2) {
                             availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
                         }
+                        else if(varArgProperties[k] == 3) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                            loadVarArg(masm, k, i, j, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                        }
                     }
                 }
                 emitSubiterCode(masm, i, j, offset);
@@ -144,6 +148,10 @@ public final class GotoABKernel extends GotoKernel {
 
             // Todo: optimize into the below code! (vbroadcastsd does not work for some addresses)
             //masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+8*iIndex));
+        }
+        else if(varArgProperties[argIndex] == 3) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+            masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+(128*iIndex)+64*jIndex));
         }
     }
 
@@ -189,6 +197,9 @@ public final class GotoABKernel extends GotoKernel {
                     }
                 }
                 else if(varArgProperties[i] == 1) {
+                    simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
+                }
+                else if(varArgProperties[i] == 3) {
                     simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
                 }
             }
