@@ -92,6 +92,14 @@ public final class GotoABTKernel extends GotoKernel {
                 aAddress = new AMD64Address(tempArrayAddressReg, loopIndex, AMD64Address.Scale.Times1, DOUBLE_ARRAY_BASE_OFFSET+(offset*8));
             }
             masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+
+            for(int k = 0; k < varArgProperties.length; k++) {
+                if(varArgProperties[k] == 1) {
+                    loadVarArg(masm, k, i, -1, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                    availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                }
+            }
+
             for(int j = 0; j < bLength; j++) {
                 availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
                 availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
@@ -103,6 +111,20 @@ public final class GotoABTKernel extends GotoKernel {
                 Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
                 Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
                 Register cRegister = xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))];
+
+                for(int k = 0; k < varArgProperties.length; k++) {
+                    if(!toLoad.contains(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k))) {
+                        if(varArgProperties[k] == 2) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
+                        else if(varArgProperties[k] == 3) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                            loadVarArg(masm, k, i, j, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                        }
+                    }
+                }
+
+
                 emitSubiterCode(masm, i, j, offset);
                 //masm.vaddpd(cRegister, aRegister, cRegister);
                 //masm.vaddpd(cRegister, bRegister, cRegister);
@@ -127,7 +149,23 @@ public final class GotoABTKernel extends GotoKernel {
     }
 
     protected void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum) {
-        return;
+        if(varArgProperties[argIndex] == 2) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+            masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+64*jIndex));
+        }
+        else if(varArgProperties[argIndex] == 1) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+
+            masm.leaq(tempArrayAddressReg, new AMD64Address(rsp, varArgOffset+8*iIndex));
+            masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempArrayAddressReg));
+
+            // Todo: optimize into the below code! (vbroadcastsd does not work for some addresses)
+            //masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+8*iIndex));
+        }
+        else if(varArgProperties[argIndex] == 3) {
+            int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+            masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+(128*iIndex)+64*jIndex));
+        }
     }
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
@@ -167,6 +205,9 @@ public final class GotoABTKernel extends GotoKernel {
                 for(int j = 0; j < bLength; j++) {
                     simdRegisters.put("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j), registerIndex++);
                 }
+            }
+            else if(varArgProperties[i] == 1 || varArgProperties[i] == 3) {
+                simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
             }
         }
         for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
