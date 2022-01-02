@@ -48,6 +48,7 @@ import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernel;
 
 public final class GotoATBKernel extends GotoKernel {
     private Boolean interleave;
+    private Map<Integer, Register> varArgAddresses;
     public GotoATBKernel(LIRGeneratorTool tool, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength,
                         long[] calc, double[] constArgs, int[] varArgProperties, GotoKernelOp kernelOp) {
         super(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, kernelOp);
@@ -96,6 +97,20 @@ public final class GotoATBKernel extends GotoKernel {
             for(int i = 0; i < aLength; i+=2) {
                 aAddress = new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8));
                 masm.vbroadcastf32x4(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+
+                for(int k = 0; k < varArgProperties.length; k++) {
+                    if(varArgProperties[k] == 1) {
+                        loadVarArg(masm, k, i, -1, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                        /*
+                        Register zeroReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-4]);
+                        masm.movq(zeroReg, 0);
+                        masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, zeroReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*k));
+                        masm.vbroadcastf32x4(xmmRegistersAVX512[simdRegisters.get("VARIABLEARG" + String.valueOf(k))], new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(i*8)));
+                        */
+                        availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                    }
+                }
+
                 for(int j = 0; j < bLength*2; j++) {
                     //Register aRegister = xmmRegistersAVX512[simdRegisters.get("A")];
                     //Register bRegister = xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))];
@@ -107,6 +122,10 @@ public final class GotoATBKernel extends GotoKernel {
                     for(int k = 0; k < varArgProperties.length; k++) {
                         if(varArgProperties[k] == 2) {
                             availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
+                        else if(varArgProperties[k] == 3) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                            loadVarArg(masm, k, i, j, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
                         }
                     }
                     emitSubiterCode(masm, i, j, offset);
@@ -120,12 +139,24 @@ public final class GotoATBKernel extends GotoKernel {
                 //masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
                 masm.movq(tempGenReg, aAddress);
                 masm.vpbroadcastq(xmmRegistersAVX512[simdRegisters.get("A")], tempGenReg);
+
+                for(int k = 0; k < varArgProperties.length; k++) {
+                    if(varArgProperties[k] == 1) {
+                        loadVarArg(masm, k, i, -1, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                        availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                    }
+                }
+
                 for(int j = 0; j < bLength; j++) {
                     availableValues.put(GotoOpCode.B, simdRegisters.get("B" + String.valueOf(j)));
                     availableValues.put(GotoOpCode.C, simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j)));
                     for(int k = 0; k < varArgProperties.length; k++) {
                         if(varArgProperties[k] == 2) {
                             availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k) + "_" + String.valueOf(j)));
+                        }
+                        else if(varArgProperties[k] == 3) {
+                            availableValues.put(GotoOpCode.VARIABLEARG + GotoOpCode.toOpLengthBinaryString(k), simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
+                            loadVarArg(masm, k, i, j, simdRegisters.get("VARIABLEARG" + String.valueOf(k)));
                         }
                     }
                     emitSubiterCode(masm, i, j, offset);
@@ -144,7 +175,80 @@ public final class GotoATBKernel extends GotoKernel {
     }
 
     protected void loadVarArg(AMD64MacroAssembler masm, int argIndex, int iIndex, int jIndex, int dstRegNum) {
-        return;
+        if(interleave) {
+            if(varArgProperties[argIndex] == 2) {
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+64*jIndex));
+            }
+            else if(varArgProperties[argIndex] == 1) {
+                /*
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+
+                masm.leaq(tempArrayAddressReg, new AMD64Address(rsp, varArgOffset+8*iIndex));
+                masm.vbroadcastf32x4(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempArrayAddressReg));
+                */
+
+                /*
+                Register zeroReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-4]);
+                masm.movq(zeroReg, 0);
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, zeroReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*argIndex));
+                masm.vbroadcastf32x4(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempArrayAddressReg, iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(iIndex*8)));
+                */
+
+                masm.vbroadcastf32x4(xmmRegistersAVX512[dstRegNum], new AMD64Address(varArgAddresses.get(argIndex), iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(iIndex*8)));
+
+
+                // Todo: optimize into the below code! (vbroadcastsd does not work for some addresses)
+                //masm.vbroadcastf32x4(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+8*iIndex));
+            }
+            else if(varArgProperties[argIndex] == 3) {
+                //int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                //masm.vmovddup(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+(128*iIndex)+64*jIndex));
+
+
+                Register zeroReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-5]);
+                masm.movq(zeroReg, 0);
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, zeroReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*argIndex));
+                Register tempRegAh = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-6]);
+                masm.movq(tempRegAh, new AMD64Address(tempArrayAddressReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(iIndex*8)));
+                int j = jIndex;
+                masm.vmovddup(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempRegAh, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+DOUBLE_ARRAY_BASE_OFFSET+((j/2)*64)+((j%2)*8)));
+            }
+        } else {
+            if(varArgProperties[argIndex] == 2) {
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+64*jIndex));
+            }
+            else if(varArgProperties[argIndex] == 1) {
+
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                /*
+                masm.leaq(tempArrayAddressReg, new AMD64Address(rsp, varArgOffset+8*iIndex));
+                masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempArrayAddressReg));
+                */
+
+                Register tempRegAAAA = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-5]);
+                masm.movq(tempRegAAAA, new AMD64Address(rsp, varArgOffset+8*iIndex));
+                masm.vpbroadcastq(xmmRegistersAVX512[dstRegNum], tempRegAAAA);
+
+                //masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(varArgAddresses.get(argIndex), iPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(iIndex*8)));
+
+                // Todo: optimize into the below code! (vbroadcastsd does not work for some addresses)
+                //masm.vbroadcastsd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+8*iIndex));
+            }
+            else if(varArgProperties[argIndex] == 3) {
+                int varArgOffset = stackOffsetToConstArgs+constArgsStackSize+variableArgsStackOffsets.get(argIndex);
+                masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(rsp, varArgOffset+(128*iIndex)+64*jIndex));
+                /*
+                Register zeroReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-5]);
+                masm.movq(zeroReg, 0);
+                masm.movq(tempArrayAddressReg, new AMD64Address(arrsPtr, zeroReg, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*argIndex));
+                Register tempRegAh = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-6]);
+                masm.movq(tempRegAh, new AMD64Address(tempArrayAddressReg, iPos, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+(iIndex*8)));
+                masm.vmovupd(xmmRegistersAVX512[dstRegNum], new AMD64Address(tempRegAh, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+(jIndex*8)));
+                */
+            }
+        }
     }
 
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
@@ -152,8 +256,16 @@ public final class GotoATBKernel extends GotoKernel {
         if(aLength % 2 == 1) {
             interleave = false;
         }
+        for(int property : varArgProperties) {
+            if(property == 3) {
+                interleave = false;
+                break;
+            }
+        }
         int registerIndex = 0;
+
         HashMap<String, Integer> simdRegisters= new HashMap<String, Integer>();
+
         for(int i = 0; i < aLength; i++) {
             for(int j = 0; j < bLength; j++) {
                 simdRegisters.put("C" + String.valueOf(i) + String.valueOf(j), registerIndex++);
@@ -171,6 +283,7 @@ public final class GotoATBKernel extends GotoKernel {
                 simdRegisters.put("B" + String.valueOf(i), registerIndex++);
             }
         }
+
         for(int i = 0; i < constArgs.length; i++) {
             if(!toLoad.contains(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i))) {
                 availableValues.put(GotoOpCode.CONSTARG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
@@ -189,7 +302,17 @@ public final class GotoATBKernel extends GotoKernel {
                     }
                 }
             }
+            else if(varArgProperties[i] == 1 || varArgProperties[i] == 3) {
+                simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
+            }
         }
+
+        int remainingSimdRegisterNum = xmmRegistersAVX512.length - registerIndex;
+        for(int i = 0; i < remainingSimdRegisterNum; i++) {
+            availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+        }
+
+        /*
         for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
             availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
         }
@@ -198,6 +321,7 @@ public final class GotoATBKernel extends GotoKernel {
         for(int i = 0; i < tempRegNums.length; i++) {
             tempRegNums[i] = registerIndex++;
         }
+        */
 
         Register tempGenReg = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-1]);
 
@@ -221,7 +345,8 @@ public final class GotoATBKernel extends GotoKernel {
         Register bPtr = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-3]);
         masm.movq(bPtr, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+8));
 
-        // Todo: Add loading constargs
+        varArgAddresses = new HashMap<Integer, Register>();
+        int genRegCountdown = 4;
 
         for(int i = 0; i < varArgProperties.length; i++) {
             if(varArgProperties[i] == 2) {
@@ -237,6 +362,12 @@ public final class GotoATBKernel extends GotoKernel {
                     }
                 }
             }
+            else if(varArgProperties[i] == 1) {
+                Register varArgRegister = asRegister(kernelOp.remainingRegValues[remainingRegisterNum-genRegCountdown]);
+                genRegCountdown++; // Todo: Do something when genRegCountdown == remainingRegisterNum
+                masm.movq(varArgRegister, new AMD64Address(arrsPtr, loopIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET+24+8*i));
+                varArgAddresses.put(i, varArgRegister);
+            }
         }
 
         for(int i = 0; i < constArgs.length; i++) {
@@ -246,10 +377,10 @@ public final class GotoATBKernel extends GotoKernel {
         }
 
         int prefetchDistance = 8;
-        int unrollFactor = 16;
+        int unrollFactor = 15;
         if(interleave) {
             prefetchDistance = 8;
-            unrollFactor = 16;
+            unrollFactor = 15;
         }
 
         masm.movq(loopIndex, kPos);
@@ -312,3 +443,4 @@ public final class GotoATBKernel extends GotoKernel {
         }
     }
 }
+

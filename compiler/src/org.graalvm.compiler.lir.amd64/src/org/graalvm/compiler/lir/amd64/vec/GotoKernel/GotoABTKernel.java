@@ -210,6 +210,12 @@ public final class GotoABTKernel extends GotoKernel {
                 simdRegisters.put("VARIABLEARG" + String.valueOf(i), registerIndex++);
             }
         }
+        int remainingSimdRegisterNum = xmmRegistersAVX512.length - registerIndex;
+        for(int i = 0; i < remainingSimdRegisterNum; i++) {
+            availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
+        }
+
+        /*
         for(int i = 0; i < xmmRegistersAVX512.length - registerIndex; i++) {
             availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
         }
@@ -218,6 +224,7 @@ public final class GotoABTKernel extends GotoKernel {
         for(int i = 0; i < tempRegNums.length; i++) {
             tempRegNums[i] = registerIndex++;
         }
+        */
 
         AMD64Address resultAddress, aAddress, bAddress;
 
