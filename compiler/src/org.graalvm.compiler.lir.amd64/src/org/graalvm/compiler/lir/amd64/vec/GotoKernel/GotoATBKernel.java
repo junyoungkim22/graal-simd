@@ -377,10 +377,10 @@ public final class GotoATBKernel extends GotoKernel {
         }
 
         int prefetchDistance = 8;
-        int unrollFactor = 15;
+        int unrollFactor = 8;
         if(interleave) {
             prefetchDistance = 8;
-            unrollFactor = 15;
+            unrollFactor = 8;
         }
 
         masm.movq(loopIndex, kPos);
