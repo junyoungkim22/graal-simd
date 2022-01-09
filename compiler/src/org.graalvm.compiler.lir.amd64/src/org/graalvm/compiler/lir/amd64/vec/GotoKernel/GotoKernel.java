@@ -300,6 +300,9 @@ public abstract class GotoKernel {
                     case GotoOpCode.ADD:
                         masm.vaddpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
                         break;
+                    case GotoOpCode.SUB:
+                        AMD64Assembler.VexRVMOp.VSUBPD.emit(masm, AVXSize.ZMM, xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
+                        break;
                     case GotoOpCode.MUL:
                         masm.vmulpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum]);
                         break;
@@ -335,6 +338,9 @@ public abstract class GotoKernel {
                 switch(op) {
                     case GotoOpCode.MASKADD:
                         masm.vaddpd(xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum], k2);
+                        break;
+                    case GotoOpCode.MASKSUB:
+                        AMD64Assembler.VexRVMOp.VSUBPD.emit(masm, AVXSize.ZMM, xmmRegistersAVX512[dstRegNum], xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum], k2);
                         break;
                 }
             }
