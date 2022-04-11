@@ -112,6 +112,7 @@ import org.graalvm.compiler.lir.amd64.vec.MatmulKernel2x8Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel8x16Op;
 import org.graalvm.compiler.lir.amd64.vec.MatmulKernel1D2x8Op;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernelOp;
+import org.graalvm.compiler.lir.amd64.vec.ConvKernel.ConvKernelOp;
 import org.graalvm.compiler.lir.amd64.vector.AMD64VectorCompareOp;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.lir.gen.LIRGenerator;
@@ -803,5 +804,11 @@ public abstract class AMD64LIRGenerator extends LIRGenerator {
     public void emitGotoKernel(Value arrs, Value kPanelSize,
                                     Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         append(new GotoKernelOp(this, arrs, kPanelSize, i, k, j, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties));
+    }
+
+    @Override
+    public void emitConvKernel(Value arrs, Value kPanelSize,
+                                    Value i, Value k, Value j, int kernelType, int aLength, int bLength, int outChannels, int inChannels, int imgLength, int kernelLength, long[] calc, double[] constArgs, int[] varArgProperties) {
+        append(new ConvKernelOp(this, arrs, kPanelSize, i, k, j, kernelType, aLength, bLength, outChannels, inChannels, imgLength, kernelLength, calc, constArgs, varArgProperties));
     }
 }

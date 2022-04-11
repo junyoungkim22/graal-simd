@@ -353,6 +353,12 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
                                     Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
         throw GraalError.unimplemented("AMD64 specific instruction.");
     }
+
+    @SuppressWarnings("unused")
+    default void emitConvKernel(Value arrs, Value kPanelSize,
+                                    Value i, Value k, Value j, int kernelType, int aLength, int bLength, int outChannels, int inChannels, int imgLength, int kernelLength, long[] calc, double[] constArgs, int[] varArgProperties) {
+        throw GraalError.unimplemented("AMD64 specific instruction.");
+    }
     /**
      * Emits instruction(s) to flush an individual cache line that starts at {@code address}.
      */
