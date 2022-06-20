@@ -89,6 +89,7 @@ import org.graalvm.compiler.nodes.vec.MatmulKernel8x16Node;
 import org.graalvm.compiler.nodes.vec.MatmulKernel2x8Node;
 import org.graalvm.compiler.nodes.vec.MatmulKernel1D2x8Node;
 import org.graalvm.compiler.nodes.vec.GotoKernelNode;
+import org.graalvm.compiler.nodes.vec.ConvKernelNode;
 import org.graalvm.compiler.nodes.virtual.EnsureVirtualizedNode;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.replacements.nodes.arithmetic.UnsignedMulHighNode;
@@ -481,6 +482,14 @@ public class TruffleGraphBuilderPlugins {
             public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode arrs, ValueNode kPanelSize,
                                     ValueNode i, ValueNode k, ValueNode j, ValueNode constArgs) {
                 b.add(new GotoKernelNode(arrs, kPanelSize, i, k, j, constArgs));
+                return true;
+            }
+        });
+        r.register6("convKernel", Object[].class, int.class, int.class, int.class, int.class, long[].class, new InvocationPlugin() {
+            @Override
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode arrs, ValueNode kPanelSize,
+                                    ValueNode i, ValueNode k, ValueNode j, ValueNode constArgs) {
+                b.add(new ConvKernelNode(arrs, kPanelSize, i, k, j, constArgs));
                 return true;
             }
         });

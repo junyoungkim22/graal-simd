@@ -614,12 +614,15 @@ public final class CompilerDirectives {
     }
 
     public static void gotoKernel(Object[] arrs, int kPanelSize, int i, int k, int j, long[] constArgs) {
-	double[][] a = (double[][]) arrs[0];
-	double[][] b = (double[][]) arrs[1];
-	double[][] result = (double[][]) arrs[2];
-	int aLength = (int) constArgs[0];
-	int bLength = (int) constArgs[1];
-	int kernelType = (int) constArgs[constArgs.length-1];
+        if(!(arrs[0] instanceof double[][])) {
+            return;
+        }
+        double[][] a = (double[][]) arrs[0];
+        double[][] b = (double[][]) arrs[1];
+        double[][] result = (double[][]) arrs[2];
+        int aLength = (int) constArgs[0];
+        int bLength = (int) constArgs[1];
+        int kernelType = (int) constArgs[constArgs.length-1];
         for(int kk = k; kk < k+kPanelSize; kk++) {
             for(int ii = i; ii < i+aLength; ii++) {
                 for(int jj = j; jj < j+bLength; jj++) {
@@ -636,5 +639,9 @@ public final class CompilerDirectives {
                 }
             }
         }
+    }
+
+    public static void convKernel(Object[] arrs, int kPanelSize, int i, int k, int j, long[] constArgs) {
+        return;
     }
 }
