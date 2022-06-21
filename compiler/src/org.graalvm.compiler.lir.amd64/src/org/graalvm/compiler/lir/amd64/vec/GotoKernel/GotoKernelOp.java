@@ -66,7 +66,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
     @Temp({REG}) Value[] remainingRegValues;
 
     public GotoKernelOp(LIRGeneratorTool tool, Value arrs, Value kPanelSize,
-                                    Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, long[] calc, double[] constArgs, int[] varArgProperties) {
+                                    Value i, Value k, Value j, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength, 
+                                    long[] calc, double[] constArgs, int[] varArgProperties, int[] miscArgs) {
         super(TYPE);
 
         switch(kernelType) {
@@ -82,9 +83,8 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             case 3: // A^TB^T
                 this.gotoKernel = new GotoABKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, true);
                 break;
-            default: // packed
-                // kernelType is kPack
-                this.gotoKernel = new GotoPackedKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, kernelType);
+            case 4: // packed
+                this.gotoKernel = new GotoPackedKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, miscArgs);
                 break;
         }
 

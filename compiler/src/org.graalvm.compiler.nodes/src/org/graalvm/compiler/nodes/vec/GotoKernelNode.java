@@ -62,7 +62,16 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
 	    int nLength = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 	    int kernelType = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
 
+		int[] miscArgs = null;
+		if (kernelType == 4) { // is packed kernel?
+			miscArgs = new int[3];
+			miscArgs[0] = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+			miscArgs[1] = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+			miscArgs[2] = (int) gen.getLIRGeneratorTool().getProviders().getConstantReflection().readArrayElement(constArgs.asJavaConstant(), curr++).asLong();
+		}
+
         gen.getLIRGeneratorTool().emitGotoKernel(gen.operand(arrs), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j), kernelType, aLength, bLength, mLength, kLength, nLength, argLong, constDoubleArgs, varArgProperties);
+                                                        gen.operand(i), gen.operand(k), gen.operand(j), kernelType, aLength, bLength, mLength, kLength, nLength, 
+														argLong, constDoubleArgs, varArgProperties, miscArgs);
     }
 }
