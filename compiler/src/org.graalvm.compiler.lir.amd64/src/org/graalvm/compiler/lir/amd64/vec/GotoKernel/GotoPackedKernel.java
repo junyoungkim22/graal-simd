@@ -43,6 +43,7 @@ import static jdk.vm.ci.amd64.AMD64.rdx;
 import static jdk.vm.ci.amd64.AMD64.cpuRegisters;
 import static jdk.vm.ci.amd64.AMD64.xmmRegistersAVX512;
 import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.QWORD;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.DWORD;
 
 import org.graalvm.compiler.lir.amd64.vec.util.ChangeableString;
 import org.graalvm.compiler.lir.amd64.vec.GotoOpCode;
@@ -75,6 +76,14 @@ public final class GotoPackedKernel extends GotoKernel {
                         Register aPtr, Register bPtr, Register aIndex, Register bIndex, Register temp) {
         AMD64Address aAddress, bAddress;
 
+        if(prefetchDistance > 0) {
+            for(int j = 0; j < bLength; j++) {
+                bAddress = new AMD64Address(bPtr, bIndex, DOUBLE_ARRAY_INDEX_SCALE, 
+                               DOUBLE_ARRAY_BASE_OFFSET+(j*64)+(offset*8*bLength*8)+(prefetchDistance*8*bLength*8));
+                masm.prefetcht0(bAddress);
+            }
+        }
+
         if(interleave) {
             for(int j = 0; j < bLength*2; j++) {
                 bAddress = new AMD64Address(bPtr, bIndex, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET+((j/2)*64)+((j%2)*8)+(offset*8*bLength*8));
@@ -104,6 +113,8 @@ public final class GotoPackedKernel extends GotoKernel {
                 for(int j = 0; j < bLength*2; j++) {
                     masm.vfmadd231pd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], 
                                     xmmRegistersAVX512[simdRegisters.get("A")], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
+                    //masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("A")]);
+                    //masm.vaddpd(xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i+(j%2)) + String.valueOf(j/2))], xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
                 }
             }
         } else {
@@ -185,7 +196,7 @@ public final class GotoPackedKernel extends GotoKernel {
         Register kPosTemp = notRaxRdxRegs.pop();
         masm.movq(kPosTemp, kPos);
         Register kPackTemp = notRaxRdxRegs.pop();
-        masm.movl(kPackTemp, kPack);
+        masm.movq(kPackTemp, kPack);
 
         masm.push(rax);
         masm.push(rdx);
@@ -194,11 +205,12 @@ public final class GotoPackedKernel extends GotoKernel {
         Register kStart = notRaxRdxRegs.pop();
 
         masm.movq(rdx, 0);
-        masm.movq(rax, kPos);
-        AMD64Assembler.AMD64MOp.IDIV.emit(masm, QWORD, kPackTemp);
+        masm.movq(rax, kPosTemp);
+        AMD64Assembler.AMD64MOp.IDIV.emit(masm, DWORD, kPackTemp);
         masm.movq(kPosDivKpack, rax);
         masm.movq(kStart, rdx);
 
+        addToNoDivStack(notRaxRdxRegs, kPackTemp);
         addToNoDivStack(notRaxRdxRegs, kPosTemp);
 
         masm.pop(rdx);
@@ -214,6 +226,19 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.movq(aIndex, kPosDivKpack);
         masm.imull(aIndex, aIndex, mLength);
         masm.imull(aIndex, aIndex, kPack);
+
+        /*
+        masm.push(aIndex);
+        masm.push(bIndex);
+        masm.movq(bIndex, 0);
+        masm.movq(aIndex, new AMD64Address(arrsPtr, bIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET + 24));
+        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET), kPackTemp);
+        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET+4), kPack);
+        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET+8), kPosDivKpack);
+        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET+12), kStart);
+        masm.pop(bIndex);
+        masm.pop(aIndex);
+        */
 
         addToNoDivStack(notRaxRdxRegs, kPosDivKpack);
 
@@ -255,7 +280,6 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.push(iPos);
         masm.push(jPos);
 
-
         masm.movq(temp, 0);
         //Register aPtr = notRaxRdxRegs.pop();
         Register aPtr = iPos;
@@ -295,13 +319,16 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.addq(bPtr, bAlignmentOffset);
 
         int unrollFactor = 4;
+        int prefetchDistance = 0;
         masm.movq(temp, kernelWidth);
         masm.imull(temp, temp, unrollFactor);
         masm.subq(loopEndReg, temp);
 
+        //masm.movq(aIndex, 288);
+
         masm.bind(loopLabel);
         for(int i = 0; i < unrollFactor; i++) {
-            subIter(aLength, bLength, i, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
+            subIter(aLength, bLength, i, prefetchDistance, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
         }
         masm.addq(bIndex, kernelWidth*unrollFactor);
         masm.addq(aIndex, aLength*unrollFactor);
@@ -317,7 +344,6 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.addq(aIndex, aLength*1);
         masm.cmpq(bIndex, loopEndReg);
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
-
 
         addToNoDivStack(notRaxRdxRegs, temp);
 

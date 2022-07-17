@@ -51,6 +51,9 @@ import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernelOp;
 public abstract class GotoKernel {
     protected int opLength = 5;
 
+    protected final int INT_ARRAY_BASE_OFFSET;
+    protected final Scale INT_ARRAY_INDEX_SCALE;
+
     protected final int DOUBLE_ARRAY_BASE_OFFSET;
     protected final Scale DOUBLE_ARRAY_INDEX_SCALE;
 
@@ -90,6 +93,9 @@ public abstract class GotoKernel {
 
     public GotoKernel(LIRGeneratorTool tool, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength,
                         long[] calc, double[] constArgs, int[] varArgProperties, GotoKernelOp kernelOp) {
+        INT_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Int);
+        INT_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Int)));
+
         DOUBLE_ARRAY_BASE_OFFSET = tool.getProviders().getMetaAccess().getArrayBaseOffset(JavaKind.Double);
         DOUBLE_ARRAY_INDEX_SCALE = Objects.requireNonNull(Scale.fromInt(tool.getProviders().getMetaAccess().getArrayIndexScale(JavaKind.Double)));
 
