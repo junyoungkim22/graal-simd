@@ -51,14 +51,14 @@ import org.graalvm.compiler.lir.amd64.vec.dag.ExprDag;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernelOp;
 import org.graalvm.compiler.lir.amd64.vec.GotoKernel.GotoKernel;
 
-public final class GotoPackedKernel extends GotoKernel {
+public final class GotoInterleavePackedKernel extends GotoKernel {
     private boolean interleave;
     private int kPack;
     private int aAddressOffset;
     private int aAlignmentOffset;
     private int bAlignmentOffset;
 
-    public GotoPackedKernel(LIRGeneratorTool tool, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength,
+    public GotoInterleavePackedKernel(LIRGeneratorTool tool, int kernelType, int aLength, int bLength, int mLength, int kLength, int nLength,
                         long[] calc, double[] constArgs, int[] varArgProperties, GotoKernelOp kernelOp, int[] miscArgs) {
         super(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, kernelOp);
         this.interleave = true;
@@ -146,8 +146,6 @@ public final class GotoPackedKernel extends GotoKernel {
     protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
         if(aLength % 2 == 1) {
             interleave = false;
-        } else {
-            interleave = true;
         }
         // Declare SIMD registers
         int registerIndex = 0;
@@ -321,27 +319,12 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.addq(bPtr, bAlignmentOffset);
 
         int unrollFactor = 4;
-        int prefetchDistance = 4;
+        int prefetchDistance = 0;
         masm.movq(temp, kernelWidth);
         masm.imull(temp, temp, unrollFactor);
         masm.subq(loopEndReg, temp);
 
         //masm.movq(aIndex, 288);
-        
-        // Code to write stuff to the debug array.
-        /*
-        masm.push(aIndex);
-        masm.push(bIndex);
-        masm.movq(bIndex, 0);
-        masm.movq(aIndex, new AMD64Address(arrsPtr, bIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET + 24));
-        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET), 3450);
-        masm.pop(bIndex);
-        masm.pop(aIndex);
-        */
-
-        Label endLabel = new Label();
-        masm.cmpq(bIndex, loopEndReg);
-        masm.jcc(AMD64Assembler.ConditionFlag.GreaterEqual, endLabel);
 
         masm.bind(loopLabel);
         for(int i = 0; i < unrollFactor; i++) {
@@ -351,8 +334,6 @@ public final class GotoPackedKernel extends GotoKernel {
         masm.addq(aIndex, aLength*unrollFactor);
         masm.cmpq(bIndex, loopEndReg);
         masm.jcc(AMD64Assembler.ConditionFlag.Less, loopLabel);
-
-        masm.bind(endLabel);
 
         masm.addq(loopEndReg, temp);
 
@@ -366,39 +347,11 @@ public final class GotoPackedKernel extends GotoKernel {
 
         addToNoDivStack(notRaxRdxRegs, temp);
 
-
-        /*
-        subIter(aLength, bLength, 0, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        masm.addq(bIndex, kernelWidth*1);
-        masm.addq(aIndex, aLength*1);
-        subIter(aLength, bLength, 0, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        */
-
-        /*
-        masm.push(aIndex);
-        masm.push(bIndex);
-        masm.movq(bIndex, 0);
-        masm.movq(aIndex, new AMD64Address(arrsPtr, bIndex, OBJECT_ARRAY_INDEX_SCALE, OBJECT_ARRAY_BASE_OFFSET + 24));
-        masm.movl(new AMD64Address(aIndex, bIndex, INT_ARRAY_INDEX_SCALE, INT_ARRAY_BASE_OFFSET), aLength);
-        masm.pop(bIndex);
-        masm.pop(aIndex);
-        subIter(aLength, bLength, 0, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        subIter(aLength, bLength, 1, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        */
-        /*
-        subIter(aLength, bLength, 2, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        subIter(aLength, bLength, 3, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        subIter(aLength, bLength, 4, 0, masm, simdRegisters, aPtr, bPtr, aIndex, bIndex, temp);
-        */
-
-
         /*
         masm.pop(kPos);
         masm.pop(jPos);
         masm.pop(iPos);
         */
-
-        // Comment these two lines to cause a segfault and dump asm code to a log file.
         masm.pop(jPos);
         masm.pop(iPos);
 

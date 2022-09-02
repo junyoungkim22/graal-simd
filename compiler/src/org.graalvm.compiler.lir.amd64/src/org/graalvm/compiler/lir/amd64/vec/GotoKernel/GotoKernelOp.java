@@ -86,6 +86,9 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
             case 4: // packed
                 this.gotoKernel = new GotoPackedKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, miscArgs);
                 break;
+            case 5: // Interleave packed
+                this.gotoKernel = new GotoInterleavePackedKernel(tool, kernelType, aLength, bLength, mLength, kLength, nLength, calc, constArgs, varArgProperties, this, miscArgs);
+                break;
         }
 
         arrsValue = arrs;
