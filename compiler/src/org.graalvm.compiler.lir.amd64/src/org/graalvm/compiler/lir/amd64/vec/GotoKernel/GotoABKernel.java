@@ -22,6 +22,7 @@ public final class GotoABKernel extends GotoKernel {
 
   public GotoABKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -35,6 +36,7 @@ public final class GotoABKernel extends GotoKernel {
       Boolean transpose) {
     super(
         tool,
+        arch,
         kernelType,
         aLength,
         bLength,

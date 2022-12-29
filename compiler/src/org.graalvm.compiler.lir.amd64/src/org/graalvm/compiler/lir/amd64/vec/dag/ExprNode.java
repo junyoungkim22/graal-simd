@@ -1,7 +1,5 @@
 package org.graalvm.compiler.lir.amd64.vec.dag;
 
-
-
 public final class ExprNode {
   private String op;
   private int id;

@@ -48,6 +48,14 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
             .readArrayLength(constArgs.asJavaConstant());
     int curr = 0;
 
+    int arch =
+        (int)
+            gen.getLIRGeneratorTool()
+                .getProviders()
+                .getConstantReflection()
+                .readArrayElement(constArgs.asJavaConstant(), curr++)
+                .asLong();
+
     int aLength =
         (int)
             gen.getLIRGeneratorTool()
@@ -177,6 +185,7 @@ public final class GotoKernelNode extends FixedWithNextNode implements LIRLowera
             gen.operand(i),
             gen.operand(k),
             gen.operand(j),
+            arch,
             kernelType,
             aLength,
             bLength,

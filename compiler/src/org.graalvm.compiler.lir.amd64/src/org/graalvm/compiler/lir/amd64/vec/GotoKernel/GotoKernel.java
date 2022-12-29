@@ -72,6 +72,7 @@ public abstract class GotoKernel {
 
   public GotoKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,

@@ -31,6 +31,7 @@ public final class GotoPackedKernel extends GotoKernel {
 
   public GotoPackedKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -44,6 +45,7 @@ public final class GotoPackedKernel extends GotoKernel {
       int[] miscArgs) {
     super(
         tool,
+        arch,
         kernelType,
         aLength,
         bLength,

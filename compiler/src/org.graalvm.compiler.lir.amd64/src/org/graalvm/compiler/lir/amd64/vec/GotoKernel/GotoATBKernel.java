@@ -20,6 +20,7 @@ public final class GotoATBKernel extends GotoKernel {
 
   public GotoATBKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -32,6 +33,7 @@ public final class GotoATBKernel extends GotoKernel {
       GotoKernelOp kernelOp) {
     super(
         tool,
+        arch,
         kernelType,
         aLength,
         bLength,

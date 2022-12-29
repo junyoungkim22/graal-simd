@@ -25,6 +25,7 @@ public final class GotoInterleavePackedKernel extends GotoKernel {
 
   public GotoInterleavePackedKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -38,6 +39,7 @@ public final class GotoInterleavePackedKernel extends GotoKernel {
       int[] miscArgs) {
     super(
         tool,
+        arch,
         kernelType,
         aLength,
         bLength,

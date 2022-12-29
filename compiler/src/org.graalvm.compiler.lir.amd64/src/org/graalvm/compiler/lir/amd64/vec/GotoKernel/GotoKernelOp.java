@@ -50,6 +50,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
       Value i,
       Value k,
       Value j,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -67,6 +68,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoABKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,
@@ -83,6 +85,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoATBKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,
@@ -98,6 +101,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoABTKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,
@@ -113,6 +117,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoABKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,
@@ -129,6 +134,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoPackedKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,
@@ -145,6 +151,7 @@ public final class GotoKernelOp extends AMD64LIRInstruction {
         this.gotoKernel =
             new GotoInterleavePackedKernel(
                 tool,
+                arch,
                 kernelType,
                 aLength,
                 bLength,

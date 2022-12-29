@@ -19,6 +19,7 @@ import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 public final class GotoABTKernel extends GotoKernel {
   public GotoABTKernel(
       LIRGeneratorTool tool,
+      int arch,
       int kernelType,
       int aLength,
       int bLength,
@@ -31,6 +32,7 @@ public final class GotoABTKernel extends GotoKernel {
       GotoKernelOp kernelOp) {
     super(
         tool,
+        arch,
         kernelType,
         aLength,
         bLength,
