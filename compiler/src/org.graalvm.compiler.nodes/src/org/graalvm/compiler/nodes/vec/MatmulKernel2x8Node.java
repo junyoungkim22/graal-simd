@@ -13,30 +13,45 @@ import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 @NodeInfo(cycles = CYCLES_1, size = SIZE_1)
 public final class MatmulKernel2x8Node extends FixedWithNextNode implements LIRLowerable {
-    public static final NodeClass<MatmulKernel2x8Node> TYPE = NodeClass.create(MatmulKernel2x8Node.class);
+  public static final NodeClass<MatmulKernel2x8Node> TYPE =
+      NodeClass.create(MatmulKernel2x8Node.class);
 
-    @Input ValueNode a;
-    @Input ValueNode b;
-    @Input ValueNode result;
-    @Input ValueNode kPanelSize;
-    @Input ValueNode i;
-    @Input ValueNode k;
-    @Input ValueNode j;
+  @Input ValueNode a;
+  @Input ValueNode b;
+  @Input ValueNode result;
+  @Input ValueNode kPanelSize;
+  @Input ValueNode i;
+  @Input ValueNode k;
+  @Input ValueNode j;
 
-    public MatmulKernel2x8Node(ValueNode a, ValueNode b, ValueNode result, ValueNode kPanelSize, ValueNode i, ValueNode k, ValueNode j) {
-        super(TYPE, StampFactory.forVoid());
-        this.a = a;
-        this.b = b;
-        this.result = result;
-        this.kPanelSize = kPanelSize;
-        this.i = i;
-        this.k = k;
-        this.j = j;
-    }
+  public MatmulKernel2x8Node(
+      ValueNode a,
+      ValueNode b,
+      ValueNode result,
+      ValueNode kPanelSize,
+      ValueNode i,
+      ValueNode k,
+      ValueNode j) {
+    super(TYPE, StampFactory.forVoid());
+    this.a = a;
+    this.b = b;
+    this.result = result;
+    this.kPanelSize = kPanelSize;
+    this.i = i;
+    this.k = k;
+    this.j = j;
+  }
 
-    @Override
-    public void generate(NodeLIRBuilderTool gen) {
-        gen.getLIRGeneratorTool().emitMatmulKernel2x8(gen.operand(a), gen.operand(b), gen.operand(result), gen.operand(kPanelSize),
-                                                        gen.operand(i), gen.operand(k), gen.operand(j));
-    }
+  @Override
+  public void generate(NodeLIRBuilderTool gen) {
+    gen.getLIRGeneratorTool()
+        .emitMatmulKernel2x8(
+            gen.operand(a),
+            gen.operand(b),
+            gen.operand(result),
+            gen.operand(kPanelSize),
+            gen.operand(i),
+            gen.operand(k),
+            gen.operand(j));
+  }
 }
