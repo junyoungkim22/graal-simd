@@ -160,7 +160,7 @@ public abstract class GotoKernel {
     this.kLength = kLength;
     this.nLength = nLength;
     this.initialALength = aLength;
-    //this.initialBLength = bLength / 8;
+    // this.initialBLength = bLength / 8;
 
     constArgStackSlotSize = 32; // Causes an error if value if 8 (do not know reason why)
 
@@ -400,26 +400,29 @@ public abstract class GotoKernel {
                 xmmRegistersAVX512[src1RegNum]);
             break;
           case GotoOpCode.FMADD:
-            switch(arch) {
+            switch (arch) {
               case 1: // AVX2
               case 2: // AVX512
                 masm.vfmadd231pd(
-                xmmRegistersAVX512[dstRegNum],
-                xmmRegistersAVX512[src0RegNum],
-                xmmRegistersAVX512[src1RegNum],
-                simdSize);
+                    xmmRegistersAVX512[dstRegNum],
+                    xmmRegistersAVX512[src0RegNum],
+                    xmmRegistersAVX512[src1RegNum],
+                    simdSize);
                 break;
               default:
               case 0: // AVX
-                AMD64Assembler.VexRVMOp.VMULPD.emit(masm, 
-                simdSize, xmmRegistersAVX512[totalSimdRegisterNum-1],
-                xmmRegistersAVX512[src0RegNum],
-                xmmRegistersAVX512[src1RegNum]);
-                AMD64Assembler.VexRVMOp.VADDPD.emit(masm,
-                simdSize, xmmRegistersAVX512[dstRegNum],
-                xmmRegistersAVX512[totalSimdRegisterNum-1],
-                xmmRegistersAVX512[dstRegNum]
-                );
+                AMD64Assembler.VexRVMOp.VMULPD.emit(
+                    masm,
+                    simdSize,
+                    xmmRegistersAVX512[totalSimdRegisterNum - 1],
+                    xmmRegistersAVX512[src0RegNum],
+                    xmmRegistersAVX512[src1RegNum]);
+                AMD64Assembler.VexRVMOp.VADDPD.emit(
+                    masm,
+                    simdSize,
+                    xmmRegistersAVX512[dstRegNum],
+                    xmmRegistersAVX512[totalSimdRegisterNum - 1],
+                    xmmRegistersAVX512[dstRegNum]);
                 break;
             }
             break;

@@ -118,10 +118,15 @@ public final class GotoPackedKernel extends GotoKernel {
                 bPtr,
                 bIndex,
                 DOUBLE_ARRAY_INDEX_SCALE,
-                DOUBLE_ARRAY_BASE_OFFSET + (j * (kernelWidth / bLength) * 8) + (offset * kernelWidth * 8));
-        AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize, 
-          xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
-        //masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
+                DOUBLE_ARRAY_BASE_OFFSET
+                    + (j * (kernelWidth / bLength) * 8)
+                    + (offset * kernelWidth * 8));
+        AMD64Assembler.VexMoveOp.VMOVUPD.emit(
+            masm,
+            simdSize,
+            xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))],
+            bAddress);
+        // masm.vmovupd(xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))], bAddress);
       }
     }
 
@@ -180,9 +185,11 @@ public final class GotoPackedKernel extends GotoKernel {
                 DOUBLE_ARRAY_INDEX_SCALE,
                 DOUBLE_ARRAY_BASE_OFFSET + (i * 8) - aAddressOffset + (offset * 8 * aLength));
 
-        // There is a bug in Graal where for vbroadcastsd offset 0xc8 becomes 0x18. Fix later. Setting aAddressOffset to 4 to fixes this.
-        //masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
-        AMD64Assembler.VexRMOp.VPBROADCASTQ.emit(masm, simdSize, xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+        // There is a bug in Graal where for vbroadcastsd offset 0xc8 becomes 0x18. Fix later.
+        // Setting aAddressOffset to 4 to fixes this.
+        // masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
+        AMD64Assembler.VexRMOp.VPBROADCASTQ.emit(
+            masm, simdSize, xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
 
         /*
         Register temp = availableGenRegs.poll();
@@ -218,8 +225,8 @@ public final class GotoPackedKernel extends GotoKernel {
           }
           emitSubiterCode(masm, i, j, offset);
           /*
-          AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize, 
-          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))], 
+          AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize,
+          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
           //xmmRegistersAVX512[simdRegisters.get("A")]);
           xmmRegistersAVX512[simdRegisters.get("B" + String.valueOf(j))]);
           */
@@ -346,7 +353,8 @@ public final class GotoPackedKernel extends GotoKernel {
   }
 
   protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
-    // if kernel height is odd or if cpu does not support AVX512, do not emit kernel with interleaved calculations.
+    // if kernel height is odd or if cpu does not support AVX512, do not emit kernel with
+    // interleaved calculations.
     if (aLength % 2 == 1 || this.arch != 2) {
       interleave = false;
       aAddressOffset = 4;
@@ -471,17 +479,19 @@ public final class GotoPackedKernel extends GotoKernel {
         xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
     */
     AMD64Assembler.VexRVMOp.VXORPD.emit(
-      masm,
-      simdSize,
-      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
-      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
-      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
+        masm,
+        simdSize,
+        xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
+        xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
+        xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
     for (int i = 0; i < aLength; i++) {
       for (int j = 0; j < bLength; j++) {
         if (i != 0 || j != 0) {
-          AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize, 
-          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
-          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
+          AMD64Assembler.VexMoveOp.VMOVUPD.emit(
+              masm,
+              simdSize,
+              xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
+              xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
           /*
           masm.vmovupd(
               xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
@@ -491,16 +501,16 @@ public final class GotoPackedKernel extends GotoKernel {
       }
     }
 
-    switch(arch) {
+    switch (arch) {
       case 0: // AVX
       case 1: // AVX2
-        this.kernelWidth = bLength*4;
+        this.kernelWidth = bLength * 4;
         break;
       case 2:
-        this.kernelWidth = bLength*8;
+        this.kernelWidth = bLength * 8;
         break;
       default:
-        this.kernelWidth = bLength*4;
+        this.kernelWidth = bLength * 4;
         break;
     }
 
@@ -786,8 +796,14 @@ public final class GotoPackedKernel extends GotoKernel {
         for (int j = 0; j < bLength; j++) {
           resultAddress =
               new AMD64Address(
-                  temp2, jPos, DOUBLE_ARRAY_INDEX_SCALE, DOUBLE_ARRAY_BASE_OFFSET + (j * (kernelWidth / bLength) * 8));
-          AMD64Assembler.VexRVMOp.VADDPD.emit(masm, simdSize, xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
+                  temp2,
+                  jPos,
+                  DOUBLE_ARRAY_INDEX_SCALE,
+                  DOUBLE_ARRAY_BASE_OFFSET + (j * (kernelWidth / bLength) * 8));
+          AMD64Assembler.VexRVMOp.VADDPD.emit(
+              masm,
+              simdSize,
+              xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
               xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
               resultAddress);
           /*
@@ -796,9 +812,11 @@ public final class GotoPackedKernel extends GotoKernel {
               xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
               resultAddress);
           */
-          AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize, 
-          resultAddress,
-          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))]);
+          AMD64Assembler.VexMoveOp.VMOVUPD.emit(
+              masm,
+              simdSize,
+              resultAddress,
+              xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))]);
           /*
           masm.vmovupd(
               resultAddress,
