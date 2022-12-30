@@ -336,7 +336,8 @@ public final class GotoPackedKernel extends GotoKernel {
   }
 
   protected void emitKernelCode(AMD64MacroAssembler masm, int aLength, int bLength) {
-    if (aLength % 2 == 1) {
+    // if kernel height is odd or if cpu does not support AVX512, do not emit kernel with interleaved calculations.
+    if (aLength % 2 == 1 || this.arch != 2) {
       interleave = false;
       aAddressOffset = 4;
     } else {
@@ -453,16 +454,29 @@ public final class GotoPackedKernel extends GotoKernel {
     AMD64Address resultAddress, aAddress, bAddress;
 
     // Set subresult regs to zero
+    /*
     masm.vpxorq(
         xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
         xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
         xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
+    */
+    AMD64Assembler.VexRVMOp.VXORPD.emit(
+      masm,
+      simdSize,
+      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
+      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))],
+      xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
     for (int i = 0; i < aLength; i++) {
       for (int j = 0; j < bLength; j++) {
         if (i != 0 || j != 0) {
+          AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize, 
+          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
+          xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
+          /*
           masm.vmovupd(
               xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(i) + String.valueOf(j))],
               xmmRegistersAVX512[simdRegisters.get("C" + String.valueOf(0) + String.valueOf(0))]);
+          */
         }
       }
     }

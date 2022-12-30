@@ -48,6 +48,9 @@ public abstract class GotoKernel {
   protected int aTempArrayAddressNumLimit;
   protected final int constArgStackSlotSize;
 
+  protected final int arch;
+  protected final int totalSimdRegisterNum;
+  protected final AVXSize simdSize;
   protected final int kernelType;
   protected final int mLength, kLength, nLength;
   protected final int initialALength;
@@ -129,6 +132,25 @@ public abstract class GotoKernel {
       }
     }
 
+    this.arch = arch;
+    switch (arch) {
+      case 0: // AVX
+        // Need to reserve one register for multiplication + addition
+        totalSimdRegisterNum = 15;
+        simdSize = AVXSize.YMM;
+        break;
+      case 1: // AVX2
+        totalSimdRegisterNum = 16;
+        simdSize = AVXSize.YMM;
+        break;
+      case 2: // AVX512
+        totalSimdRegisterNum = 32;
+        simdSize = AVXSize.ZMM;
+        break;
+      default:
+        totalSimdRegisterNum = 15;
+        simdSize = AVXSize.YMM;
+    }
     this.kernelType = kernelType;
     this.mLength = mLength;
     this.kLength = kLength;
