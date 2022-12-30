@@ -188,7 +188,7 @@ public final class GotoPackedKernel extends GotoKernel {
         // There is a bug in Graal where for vbroadcastsd offset 0xc8 becomes 0x18. Fix later.
         // Setting aAddressOffset to 4 to fixes this.
         // masm.vbroadcastsd(xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
-        AMD64Assembler.VexRMOp.VPBROADCASTQ.emit(
+        AMD64Assembler.VexRMOp.VBROADCASTSD.emit(
             masm, simdSize, xmmRegistersAVX512[simdRegisters.get("A")], aAddress);
 
         /*
