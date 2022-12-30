@@ -135,19 +135,23 @@ public abstract class GotoKernel {
     this.arch = arch;
     switch (arch) {
       case 0: // AVX
+        this.initialBLength = bLength / 4;
         // Need to reserve one register for multiplication + addition
         totalSimdRegisterNum = 15;
         simdSize = AVXSize.YMM;
         break;
       case 1: // AVX2
+        this.initialBLength = bLength / 4;
         totalSimdRegisterNum = 16;
         simdSize = AVXSize.YMM;
         break;
       case 2: // AVX512
+        this.initialBLength = bLength / 8;
         totalSimdRegisterNum = 32;
         simdSize = AVXSize.ZMM;
         break;
       default:
+        this.initialBLength = bLength / 4;
         totalSimdRegisterNum = 15;
         simdSize = AVXSize.YMM;
     }
@@ -156,7 +160,7 @@ public abstract class GotoKernel {
     this.kLength = kLength;
     this.nLength = nLength;
     this.initialALength = aLength;
-    this.initialBLength = bLength / 8;
+    //this.initialBLength = bLength / 8;
 
     constArgStackSlotSize = 32; // Causes an error if value if 8 (do not know reason why)
 
@@ -396,10 +400,28 @@ public abstract class GotoKernel {
                 xmmRegistersAVX512[src1RegNum]);
             break;
           case GotoOpCode.FMADD:
-            masm.vfmadd231pd(
+            switch(arch) {
+              case 1: // AVX2
+              case 2: // AVX512
+                masm.vfmadd231pd(
                 xmmRegistersAVX512[dstRegNum],
                 xmmRegistersAVX512[src0RegNum],
+                xmmRegistersAVX512[src1RegNum],
+                simdSize);
+                break;
+              default:
+              case 0: // AVX
+                AMD64Assembler.VexRVMOp.VMULPD.emit(masm, 
+                simdSize, xmmRegistersAVX512[totalSimdRegisterNum-1],
+                xmmRegistersAVX512[src0RegNum],
                 xmmRegistersAVX512[src1RegNum]);
+                AMD64Assembler.VexRVMOp.VADDPD.emit(masm,
+                simdSize, xmmRegistersAVX512[dstRegNum],
+                xmmRegistersAVX512[totalSimdRegisterNum-1],
+                xmmRegistersAVX512[dstRegNum]
+                );
+                break;
+            }
             break;
         }
       } else if (opType.equals(GotoOpCode.CMPOP)) {

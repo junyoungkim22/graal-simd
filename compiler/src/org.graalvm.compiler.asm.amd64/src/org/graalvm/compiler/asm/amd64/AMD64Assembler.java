@@ -4972,6 +4972,13 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(dst, b);
     }
 
+    public final void vfmadd231pd(Register dst, Register a, Register b, AVXSize size) {
+        // Code: EVEX.512.66.0F38.W1 B8 /r
+        evexPrefix(dst, Register.None, a, b, size, P_66, M_0F38, W1, Z0, B0);
+        emitByte(0xB8);
+        emitModRM(dst, b);
+    }
+
     // _vfmadd231pd
     public final void vfmadd231pd(Register dst, Register a, AMD64Address b) {
         assert supports(CPUFeature.AVX512F);
