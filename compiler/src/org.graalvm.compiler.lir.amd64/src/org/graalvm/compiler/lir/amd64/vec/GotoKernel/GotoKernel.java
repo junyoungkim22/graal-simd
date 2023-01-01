@@ -524,6 +524,7 @@ public abstract class GotoKernel {
     // Push arguments in reverse order
     pushArguments(masm);
 
+    /*
     masm.movq(tempArrayAddressReg, iPos);
     masm.addq(tempArrayAddressReg, initialALength);
 
@@ -552,7 +553,32 @@ public abstract class GotoKernel {
 
       tempALength -= 1;
     }
+    */
 
+    Label endLabel = new Label();
+    for (int emitALength = initialALength; emitALength > 0; emitALength--) {
+      masm.movq(tempArrayAddressReg, iPos);
+      masm.addq(tempArrayAddressReg, emitALength);
+      Label loopLabel = new Label();
+      masm.cmpl(tempArrayAddressReg, mLength);
+      masm.jcc(AMD64Assembler.ConditionFlag.Greater, loopLabel);
+      if (arch == 1) { // AVX2
+        for (int emitBlength = initialBLength; emitBlength > 0; emitBlength--) {
+          masm.movq(tempArrayAddressReg, jPos);
+          masm.addq(tempArrayAddressReg, emitBlength * (simdSize.getBytes() / 8));
+          Label innerLoopLabel = new Label();
+          masm.cmpl(tempArrayAddressReg, nLength);
+          masm.jcc(AMD64Assembler.ConditionFlag.Greater, innerLoopLabel);
+          emitKernelCode(masm, emitALength, emitBlength);
+          masm.jmp(endLabel);
+          masm.bind(innerLoopLabel);
+        }
+      } else {
+        emitKernelCode(masm, emitALength, initialBLength);
+        masm.jmp(endLabel);
+      }
+      masm.bind(loopLabel);
+    }
     masm.bind(endLabel);
 
     // Pop arguments + B
