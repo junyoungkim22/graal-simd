@@ -91,7 +91,7 @@ public final class GotoPackedKernel extends GotoKernel {
                 bIndex,
                 DOUBLE_ARRAY_INDEX_SCALE,
                 DOUBLE_ARRAY_BASE_OFFSET
-                    + (j * (kernelWidth / bLength) * 8)
+                    + (j * simdSize.getBytes())
                     + (offset * 8 * kernelWidth)
                     + (prefetchDistance * 8 * kernelWidth));
         masm.prefetcht0(bAddress);
@@ -119,7 +119,7 @@ public final class GotoPackedKernel extends GotoKernel {
                 bIndex,
                 DOUBLE_ARRAY_INDEX_SCALE,
                 DOUBLE_ARRAY_BASE_OFFSET
-                    + (j * (kernelWidth / bLength) * 8)
+                    + (j * simdSize.getBytes())
                     + (offset * kernelWidth * 8));
         AMD64Assembler.VexMoveOp.VMOVUPD.emit(
             masm,
@@ -799,7 +799,7 @@ public final class GotoPackedKernel extends GotoKernel {
                   temp2,
                   jPos,
                   DOUBLE_ARRAY_INDEX_SCALE,
-                  DOUBLE_ARRAY_BASE_OFFSET + (j * (kernelWidth / bLength) * 8));
+                  DOUBLE_ARRAY_BASE_OFFSET + (j * simdSize.getBytes()));
           AMD64Assembler.VexRVMOp.VADDPD.emit(
               masm,
               simdSize,
