@@ -84,7 +84,7 @@ public final class GotoPackedKernel extends GotoKernel {
     AMD64Address aAddress, bAddress;
 
     if (prefetchDistance > 0) {
-      for (int j = 0; j < bLength; j++) {
+      for (int j = 0; j < 1; j++) {
         bAddress =
             new AMD64Address(
                 bPtr,
@@ -93,7 +93,7 @@ public final class GotoPackedKernel extends GotoKernel {
                 DOUBLE_ARRAY_BASE_OFFSET
                     + (j * simdSize.getBytes())
                     + (offset * 8 * kernelWidth)
-                    + (prefetchDistance * 8 * kernelWidth));
+                    + (480));
         masm.prefetcht0(bAddress);
       }
     }
