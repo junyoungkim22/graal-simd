@@ -475,10 +475,15 @@ public abstract class GotoKernel {
             predicate = AMD64Assembler.VexFloatCompareOp.Predicate.LT_OS;
             break;
         }
-        AMD64Assembler.VexFloatCompareOp.VCMPPD_AVX512.emit(masm, simdSize, k2, 
+        if (arch == 2) { // AVX512
+          AMD64Assembler.VexFloatCompareOp.VCMPPD_AVX512.emit(masm, simdSize, k2, 
           xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum],
           predicate);
-        
+        } else {
+          AMD64Assembler.VexFloatCompareOp.VCMPPD.emit(masm, simdSize, xmmRegistersAVX512[totalSimdRegisterNum-1], 
+          xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum],
+          predicate);
+        }
       } else if (opType.equals(GotoOpCode.MASKOP)) {
         // int maskRegNum = availableValues.get(getRegisterString(codeString));
         getRegisterString(codeString);
@@ -488,16 +493,37 @@ public abstract class GotoKernel {
         // Todo: Parse mask register
         switch (op) {
           case GotoOpCode.MASKADD:
+            /*
             masm.vaddpd(
                 xmmRegistersAVX512[dstRegNum],
                 xmmRegistersAVX512[src0RegNum],
                 xmmRegistersAVX512[src1RegNum],
                 k2);
+            */
+            if (this.arch == 2) {
+              AMD64Assembler.VexRVMOp.VADDPD.emit(
+                  masm,
+                  simdSize,
+                  xmmRegistersAVX512[dstRegNum],
+                  xmmRegistersAVX512[src0RegNum],
+                  xmmRegistersAVX512[src1RegNum], k2);
+            } else {
+              AMD64Assembler.VexRVMOp.VADDPD.emit(
+                  masm,
+                  simdSize,
+                  xmmRegistersAVX512[dstRegNum],
+                  xmmRegistersAVX512[src0RegNum],
+                  xmmRegistersAVX512[src1RegNum]);
+                AMD64Assembler.VexRVMOp.VMULPD.emit(masm, simdSize,
+                  xmmRegistersAVX512[dstRegNum],
+                  xmmRegistersAVX512[dstRegNum],
+                  xmmRegistersAVX512[totalSimdRegisterNum-1]);
+            }
             break;
           case GotoOpCode.MASKSUB:
             AMD64Assembler.VexRVMOp.VSUBPD.emit(
                 masm,
-                AVXSize.ZMM,
+                simdSize,
                 xmmRegistersAVX512[dstRegNum],
                 xmmRegistersAVX512[src0RegNum],
                 xmmRegistersAVX512[src1RegNum],
