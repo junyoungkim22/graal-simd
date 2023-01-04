@@ -430,7 +430,7 @@ public final class GotoPackedKernel extends GotoKernel {
       }
     }
 
-    int remainingSimdRegisterNum = xmmRegistersAVX512.length - registerIndex;
+    int remainingSimdRegisterNum = totalSimdRegisterNum - registerIndex;
     for (int i = 0; i < remainingSimdRegisterNum; i++) {
       availableValues.put(GotoOpCode.REG + GotoOpCode.toOpLengthBinaryString(i), registerIndex++);
     }
@@ -648,10 +648,16 @@ public final class GotoPackedKernel extends GotoKernel {
           }
         } else {
           for (int j = 0; j < bLength; j++) {
+            /*
             masm.vmovupd(
                 xmmRegistersAVX512[
                     simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))],
                 new AMD64Address(rsp, varArgOffset + 64 * j));
+            */
+            AMD64Assembler.VexMoveOp.VMOVUPD.emit(masm, simdSize,
+              xmmRegistersAVX512[
+                    simdRegisters.get("VARIABLEARG" + String.valueOf(i) + "_" + String.valueOf(j))],
+              new AMD64Address(rsp, varArgOffset + simdSize.getBytes() * j));
           }
         }
       } else if (varArgProperties[i] == 1) {
