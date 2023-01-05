@@ -431,14 +431,14 @@ public abstract class GotoKernel {
                 AMD64Assembler.VexRVMOp.VMULPD.emit(
                     masm,
                     simdSize,
-                    xmmRegistersAVX512[totalSimdRegisterNum - 1],
+                    xmmRegistersAVX512[totalSimdRegisterNum],
                     xmmRegistersAVX512[src0RegNum],
                     xmmRegistersAVX512[src1RegNum]);
                 AMD64Assembler.VexRVMOp.VADDPD.emit(
                     masm,
                     simdSize,
                     xmmRegistersAVX512[dstRegNum],
-                    xmmRegistersAVX512[totalSimdRegisterNum - 1],
+                    xmmRegistersAVX512[totalSimdRegisterNum],
                     xmmRegistersAVX512[dstRegNum]);
                 break;
             }
@@ -480,7 +480,7 @@ public abstract class GotoKernel {
           xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum],
           predicate);
         } else {
-          AMD64Assembler.VexFloatCompareOp.VCMPPD.emit(masm, simdSize, xmmRegistersAVX512[totalSimdRegisterNum-1], 
+          AMD64Assembler.VexFloatCompareOp.VCMPPD.emit(masm, simdSize, xmmRegistersAVX512[totalSimdRegisterNum], 
           xmmRegistersAVX512[src0RegNum], xmmRegistersAVX512[src1RegNum],
           predicate);
         }
@@ -517,7 +517,7 @@ public abstract class GotoKernel {
                 AMD64Assembler.VexRVMOp.VMULPD.emit(masm, simdSize,
                   xmmRegistersAVX512[dstRegNum],
                   xmmRegistersAVX512[dstRegNum],
-                  xmmRegistersAVX512[totalSimdRegisterNum-1]);
+                  xmmRegistersAVX512[totalSimdRegisterNum]);
             }
             break;
           case GotoOpCode.MASKSUB:
